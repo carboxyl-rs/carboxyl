@@ -13,9 +13,9 @@ const manifest = {
   version,
   license: "BSD-3-Clause",
   description: "Chromium running in your terminal",
-  homepage: "https://github.com/fathyb/carbonyl",
-  repository: "fathyb/carbonyl",
-  bugs: "https://github.com/fathyb/carbonyl/issues",
+  homepage: "https://github.com/carboxyl-rs/carboxyl",
+  repository: "carboxyl-rs/carboxyl",
+  bugs: "https://github.com/carboxyl-rs/carboxyl/issues",
   author: {
     name: "Fathy Boundjadj",
     email: "hey@fathy.fr",

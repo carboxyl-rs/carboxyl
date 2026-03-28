@@ -6,16 +6,18 @@
         <pre>
    O    O
     \  /
-O —— Cr —— O
+O —— Cb —— O
     /  \
    O    O</pre>
       </td>
-      <td><h1>Carbonyl</h1></td>
+      <td><h1>Carboxyl</h1></td>
     </tr>
   </tbody>
 </table>
 
-Carbonyl is a Chromium based browser built to run in a terminal. [Read the blog post](https://fathy.fr/carbonyl).
+Carboxyl is a community fork of [Carbonyl](https://github.com/fathyb/carbonyl), the Chromium based browser built to run in a terminal.
+
+Carboxyl retains the original Carbonyl architecture and goals. The original announcement and background are still available in the [Carbonyl blog post](https://fathy.fr/carbonyl).
 
 It supports pretty much all Web APIs including WebGL, WebGPU, audio and video playback, animations, etc..
 
@@ -25,7 +27,7 @@ Carbonyl originally started as [`html2svg`](https://github.com/fathyb/html2svg) 
 
 ## Usage
 
-> Carbonyl on Linux without Docker requires the same dependencies as Chromium.
+> Carboxyl on Linux without Docker requires the same dependencies as Chromium.
 
 ### Docker
 
@@ -83,7 +85,7 @@ Lynx is the original terminal web browser, and the oldest one still maintained.
 
 #### Cons
 
-> Some might sound like pluses, but Browsh and Carbonyl let you disable most of those if you'd like
+> Some might sound like pluses, but Browsh and Carboxyl let you disable most of those if you'd like
 
 - Does not support a lot of modern web standards
 - Cannot run JavaScript/WebAssembly
@@ -97,12 +99,12 @@ Browsh is the original "normal browser into a terminal" project. It starts Firef
 
 - It's easier to update the underlying browser: just update Firefox
 - This makes development easier: just install Firefox and compile the Go code in a few seconds
-- As of today, Browsh supports extensions while Carbonyl doesn't, although it's on our roadmap
+- As of today, Browsh supports extensions while Carboxyl doesn't, although it's on our roadmap
 
 #### Cons
 
-- It runs slower and requires more resources than Carbonyl. 50x more CPU power is needed for the same content in average, that's because Carbonyl does not downscale or copy the window framebuffer, it natively renders to the terminal resolution.
-- It uses custom stylesheets to fix the layout, which is less reliable than Carbonyl's changes to its HTML engine (Blink).
+- It runs slower and requires more resources than Carboxyl. 50x more CPU power is needed for the same content in average, that's because Carboxyl does not downscale or copy the window framebuffer, it natively renders to the terminal resolution.
+- It uses custom stylesheets to fix the layout, which is less reliable than Carboxyl's changes to its HTML engine (Blink).
 
 ## Operating System Support
 
@@ -114,11 +116,11 @@ As far as tested, the operating systems under are supported:
 
 ## Contributing
 
-Carbonyl is split in two parts: the "core" which is built into a shared library (`libcarbonyl`), and the "runtime" which dynamically loads the core (`carbonyl` executable).
+Carboxyl is split in two parts: the "core" which is built into a shared library (`libcarbonyl`), and the "runtime" which dynamically loads the core (`carbonyl` executable).
 
 The core is written in Rust and takes a few seconds to build from scratch. The runtime is a modified version of the Chromium headless shell and takes more than an hour to build from scratch.
 
-If you're just making changes to the Rust code, build `libcarbonyl` and replace it in a release version of Carbonyl.
+If you're just making changes to the Rust code, build `libcarbonyl` and replace it in a release version of Carboxyl.
 
 ### Core
 
@@ -132,7 +134,7 @@ Few notes:
 
 - Building the runtime is almost the same as building Chromium with extra steps to patch and bundle the Rust library. Scripts in the `scripts/` directory are simple wrappers around `gn`, `ninja`, etc..
 - Building Chromium for arm64 on Linux requires an amd64 processor
-- Carbonyl is only tested on Linux and macOS, other platforms likely require code changes to Chromium
+- Carboxyl is only tested on Linux and macOS, other platforms likely require code changes to Chromium
 - Chromium is huge and takes a long time to build, making your computer mostly unresponsive. An 8-core CPU such as an M1 Max or an i9 9900k with 10 Gbps fiber takes around ~1 hour to fetch and build. It requires around 100 GB of disk space.
 
 #### Fetch

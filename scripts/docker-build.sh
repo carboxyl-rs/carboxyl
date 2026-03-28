@@ -15,7 +15,7 @@ mkdir -p "build/docker"
 cp -r "$CARBONYL_ROOT/build/pre-built/$triple" "$build_dir"
 cp "$CARBONYL_ROOT/Dockerfile" "$build_dir"
 
-tag="fathyb/carbonyl:$cpu"
+tag="carboxyl-rs/carboxyl:$cpu"
 
 docker buildx build "$build_dir" --load --platform "linux/$cpu" --tag "$tag"
 
