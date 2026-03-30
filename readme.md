@@ -2,13 +2,12 @@
   <tbody>
     <tr>
       <td>
-        <p></p>
         <pre>
-   O    O
-    \  /
-O —— Cb —— O
-    /  \
-   O    O</pre>
+     OC
+      \
+OC ── Fe ── CO
+     /  \
+   CO    CO</pre>
       </td>
       <td><h1>Carboxyl</h1></td>
     </tr>
