@@ -1,6 +1,6 @@
      OC        Carboxyl is a Chromium based browser for the terminal.
       \       
-OC ── Fe ── CO In addition to the following options,
+OC —— Fe —— CO In addition to the following options,
      /  \      Carboxyl also supports most Chromium options.
    CO    CO
 

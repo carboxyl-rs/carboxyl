@@ -3,11 +3,11 @@
     <tr>
       <td>
         <pre>
-     OC
+    OC
       \
-OC ── Fe ── CO
+OC —— Fe —— CO
      /  \
-   CO    CO</pre>
+   OC    CO</pre>
       </td>
       <td><h1>Carboxyl</h1></td>
     </tr>
