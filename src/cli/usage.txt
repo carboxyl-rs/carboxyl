@@ -1,8 +1,8 @@
-   O    O      Carbonyl is a Chromium based browser for the terminal.
-    \  /       
-O —— Cr —— O   In addition to the following options,
-    /  \       Carbonyl also supports most Chromium options.
-   O    O      
+     OC        Carboxyl is a Chromium based browser for the terminal.
+      \       
+OC —— Fe —— CO In addition to the following options,
+     /  \      Carboxyl also supports most Chromium options.
+   CO    CO
 
 Usage: carbonyl [options] [url]
 
