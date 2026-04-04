@@ -3,8 +3,8 @@
     <tr>
       <td>
         <pre>
-    OC
-      \
+   OC
+     \
 OC —— Fe —— CO
      /  \
    OC    CO</pre>
