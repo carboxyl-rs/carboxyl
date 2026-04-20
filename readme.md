@@ -24,6 +24,9 @@ It's snappy, starts in less than a second, runs at 60 FPS, and idles at 0% CPU u
 
 Carbonyl originally started as [`html2svg`](https://github.com/fathyb/html2svg) and is now the runtime behind it.
 
+> Carboxyl now has a dedicated Chromium build server provided by [Lysator](https://www.lysator.liu.se/)!
+> See [this issue](https://github.com/carboxyl-rs/carboxyl/issues/9) for details.
+
 ## Usage
 
 > Carboxyl on Linux without Docker requires the same dependencies as Chromium.
