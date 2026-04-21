@@ -265,7 +265,12 @@ fn run(cmd: CommandLine) -> AppResult<()> {
     let window = ui.window_snapshot();
     let rendering_context: Rc<dyn RenderingContext> = Rc::new(SoftwareRenderingContext::new(
         physical_size(window.browser),
-    )?);
+    )
+    .map_err(|error| {
+        std::io::Error::other(format!(
+            "failed to create Servo software rendering context: {error:?}"
+        ))
+    })?);
     let delegate: Rc<dyn WebViewDelegate> = Rc::new(TerminalWebViewDelegate::new(ui.clone()));
     let webview = WebViewBuilder::new(&servo, rendering_context.clone())
         .delegate(delegate)
@@ -289,16 +294,16 @@ fn event_loop(
     signal_rx: mpsc::Receiver<RuntimeEvent>,
 ) -> AppResult<()> {
     while ui.is_running() {
-        let mut should_spin = false;
-
-        if let Some(window) = ui.update_window_if_needed() {
+        let window_changed = if let Some(window) = ui.update_window_if_needed() {
             let size = physical_size(window.browser);
 
             rendering_context.resize(size);
             webview.resize(size);
             ui.request_repaint();
-            should_spin = true;
-        }
+            true
+        } else {
+            false
+        };
 
         let timeout = if ui.is_animating() {
             Duration::from_millis(16)
@@ -306,26 +311,23 @@ fn event_loop(
             Duration::from_millis(250)
         };
 
-        match signal_rx.recv_timeout(timeout) {
+        let should_spin = match signal_rx.recv_timeout(timeout) {
             Ok(RuntimeEvent::Browser(command)) => {
                 dispatch_browser_command(webview, command)?;
-                should_spin = true;
 
                 while let Ok(RuntimeEvent::Browser(command)) = signal_rx.try_recv() {
                     dispatch_browser_command(webview, command)?;
                 }
-            }
-            Ok(RuntimeEvent::Wake) => {
-                should_spin = true;
-            }
-            Ok(RuntimeEvent::Exit) => break,
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                should_spin = ui.is_animating();
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-        }
 
-        if should_spin {
+                true
+            }
+            Ok(RuntimeEvent::Wake) => true,
+            Ok(RuntimeEvent::Exit) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => ui.is_animating(),
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+
+        if window_changed || should_spin {
             servo.spin_event_loop();
         }
 
@@ -436,7 +438,7 @@ fn spawn_input_thread(ui: Arc<SharedUi>) -> thread::JoinHandle<()> {
             let signal_tx = ui.signal_tx.clone();
 
             ui.renderer.lock().unwrap().render(move |renderer| {
-                for event in events {
+                for event in events.iter().cloned() {
                     match event {
                         Event::Scroll { delta } => {
                             let point = ui_for_render.pointer();
