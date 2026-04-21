@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-export CARBONYL_ROOT=$(cd $(dirname -- "$0") && dirname -- "$(pwd)")
-export INSTALL_DEPOT_TOOLS="true"
+echo "GN configuration is no longer used. Carboxyl now builds as a Servo-based Rust binary."
+echo "Use ./scripts/build.sh instead."
 
-source "$CARBONYL_ROOT/scripts/env.sh"
-
-(
-    cd "$CHROMIUM_SRC" &&
-    gn "$@"
-)
+exit 1

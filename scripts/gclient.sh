@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-export CARBONYL_ROOT=$(cd $(dirname -- "$0") && dirname -- "$(pwd)")
-export INSTALL_DEPOT_TOOLS="true"
+echo "Chromium tooling was removed. Carboxyl now embeds Servo directly through Cargo."
+echo "Use ./scripts/build.sh instead."
 
-source "$CARBONYL_ROOT/scripts/env.sh"
-
-(
-    cd "$CHROMIUM_ROOT" &&
-    gclient "$@"
-)
+exit 1
