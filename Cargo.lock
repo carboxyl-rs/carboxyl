@@ -698,6 +698,7 @@ dependencies = [
  "chrono",
  "dpi",
  "libc",
+ "rustls",
  "servo",
  "unicode-segmentation",
  "unicode-width",

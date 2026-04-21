@@ -1,5 +1,9 @@
 use std::error::Error;
+use std::fs::{File, OpenOptions};
+use std::io;
+use std::os::fd::{AsRawFd, RawFd};
 use std::path::Path;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
@@ -7,12 +11,14 @@ use std::thread;
 use std::time::Duration;
 
 use dpi::PhysicalSize;
+use rustls::crypto::CryptoProvider;
 use servo::{
-    Code, DeviceIntPoint, DeviceIntRect, DeviceIntSize, DevicePoint, EventLoopWaker, InputEvent,
-    Key as ServoKey, KeyState, KeyboardEvent as ServoKeyboardEvent, LoadStatus, Location,
-    Modifiers as ServoModifiers, MouseButton, MouseButtonAction, MouseButtonEvent, MouseMoveEvent,
-    NamedKey, RenderingContext, ServoBuilder, SoftwareRenderingContext, WebView, WebViewBuilder,
-    WebViewDelegate, WebViewPoint, WheelDelta, WheelEvent, WheelMode,
+    AuthenticationRequest, Code, DeviceIntPoint, DeviceIntRect, DeviceIntSize, DevicePoint,
+    EventLoopWaker, InputEvent, Key as ServoKey, KeyState, KeyboardEvent as ServoKeyboardEvent,
+    LoadStatus, Location, Modifiers as ServoModifiers, MouseButton, MouseButtonAction,
+    MouseButtonEvent, MouseMoveEvent, NamedKey, Preferences, RenderingContext, ServoBuilder,
+    ServoDelegate, ServoError, SoftwareRenderingContext, WebView, WebViewBuilder, WebViewDelegate,
+    WebViewPoint, WheelDelta, WheelEvent, WheelMode,
 };
 use url::Url;
 
@@ -231,7 +237,108 @@ impl WebViewDelegate for TerminalWebViewDelegate {
         self.ui.stop();
     }
 
+    fn request_authentication(&self, _webview: WebView, request: AuthenticationRequest) {
+        let scope = if request.for_proxy() {
+            "proxy"
+        } else {
+            "origin"
+        };
+        log::warning!(
+            "authentication requested for {} ({scope}); no prompt is implemented, denying",
+            request.url()
+        );
+    }
+
     fn notify_load_status_changed(&self, _webview: WebView, _status: LoadStatus) {}
+}
+
+struct TerminalServoDelegate;
+
+impl ServoDelegate for TerminalServoDelegate {
+    fn notify_error(&self, error: ServoError) {
+        log::error!("servo error: {error:?}");
+    }
+}
+
+struct StderrGuard {
+    saved_stderr: RawFd,
+    sink: File,
+    log_path: Option<PathBuf>,
+}
+
+impl StderrGuard {
+    fn redirect(debug: bool) -> io::Result<Self> {
+        let saved_stderr = unsafe { libc::dup(libc::STDERR_FILENO) };
+        if saved_stderr < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        let sink_result = if debug {
+            let path =
+                std::env::temp_dir().join(format!("carboxyl-stderr-{}.log", std::process::id()));
+            OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(&path)
+                .map(|sink| (sink, Some(path)))
+        } else {
+            OpenOptions::new()
+                .write(true)
+                .open("/dev/null")
+                .map(|sink| (sink, None))
+        };
+
+        let (sink, log_path) = match sink_result {
+            Ok(result) => result,
+            Err(error) => {
+                unsafe {
+                    libc::close(saved_stderr);
+                }
+
+                return Err(error);
+            }
+        };
+
+        if unsafe { libc::dup2(sink.as_raw_fd(), libc::STDERR_FILENO) } < 0 {
+            let error = io::Error::last_os_error();
+            unsafe {
+                libc::close(saved_stderr);
+            }
+            return Err(error);
+        }
+
+        Ok(Self {
+            saved_stderr,
+            sink,
+            log_path,
+        })
+    }
+}
+
+impl Drop for StderrGuard {
+    fn drop(&mut self) {
+        let _ = io::Write::flush(&mut io::stderr());
+
+        if unsafe { libc::dup2(self.saved_stderr, libc::STDERR_FILENO) } < 0 {
+            return;
+        }
+
+        unsafe {
+            libc::close(self.saved_stderr);
+        }
+
+        if let Some(path) = &self.log_path {
+            if self
+                .sink
+                .metadata()
+                .map(|metadata| metadata.len() > 0)
+                .unwrap_or(false)
+            {
+                eprintln!("carboxyl runtime logs were written to {}", path.display());
+            }
+        }
+    }
 }
 
 pub fn main() -> i32 {
@@ -250,27 +357,32 @@ pub fn main() -> i32 {
 }
 
 fn run(cmd: CommandLine) -> AppResult<()> {
+    let _stderr = StderrGuard::redirect(cmd.debug)?;
     let _terminal = input::Terminal::setup();
     let (signal_tx, signal_rx) = mpsc::channel();
     let ui = Arc::new(SharedUi::new(signal_tx.clone()));
+
+    ensure_rustls_provider_installed();
+
     let servo = ServoBuilder::default()
+        .preferences(browser_preferences(Preferences::default()))
         .event_loop_waker(Box::new(ChannelWaker {
             tx: signal_tx.clone(),
         }))
         .build();
+    servo.set_delegate(Rc::new(TerminalServoDelegate));
 
     servo.setup_logging();
 
     let url = normalize_url(extract_url(&cmd.args))?;
     let window = ui.window_snapshot();
-    let rendering_context: Rc<dyn RenderingContext> = Rc::new(SoftwareRenderingContext::new(
-        physical_size(window.browser),
-    )
-    .map_err(|error| {
-        std::io::Error::other(format!(
-            "failed to create Servo software rendering context: {error:?}"
-        ))
-    })?);
+    let rendering_context: Rc<dyn RenderingContext> = Rc::new(
+        SoftwareRenderingContext::new(physical_size(window.browser)).map_err(|error| {
+            std::io::Error::other(format!(
+                "failed to create Servo software rendering context: {error:?}"
+            ))
+        })?,
+    );
     let delegate: Rc<dyn WebViewDelegate> = Rc::new(TerminalWebViewDelegate::new(ui.clone()));
     let webview = WebViewBuilder::new(&servo, rendering_context.clone())
         .delegate(delegate)
@@ -350,10 +462,18 @@ fn paint_webview(
         DeviceIntSize::new(size.width as i32, size.height as i32),
     );
 
+    rendering_context.make_current().map_err(|error| {
+        std::io::Error::other(format!(
+            "failed to make Servo rendering context current: {error:?}"
+        ))
+    })?;
+
     webview.paint();
+
+    let image = rendering_context.read_to_image(rect);
     rendering_context.present();
 
-    let Some(image) = rendering_context.read_to_image(rect) else {
+    let Some(image) = image else {
         return Ok(());
     };
 
@@ -549,6 +669,24 @@ fn physical_size(size: Size) -> PhysicalSize<u32> {
     PhysicalSize::new(size.width, size.height)
 }
 
+fn browser_preferences(mut preferences: Preferences) -> Preferences {
+    // Servo imports proxy settings from the ambient shell environment by default.
+    // This embedder does not surface proxy auth or tunnel UX yet, so inherited proxy
+    // config frequently turns ordinary HTTPS navigations into opaque neterror pages.
+    preferences.network_http_proxy_uri.clear();
+    preferences.network_https_proxy_uri.clear();
+    preferences.network_http_no_proxy.clear();
+    preferences
+}
+
+fn ensure_rustls_provider_installed() {
+    if CryptoProvider::get_default().is_some() {
+        return;
+    }
+
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
 fn extract_url(args: &[String]) -> Option<String> {
     let mut positional_only = false;
 
@@ -734,4 +872,31 @@ fn modifiers_from_input(modifiers: &crate::input::KeyModifiers) -> ServoModifier
     }
 
     mapped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_preferences_clear_proxy_settings() {
+        let preferences = browser_preferences(Preferences {
+            network_http_proxy_uri: "http://proxy.example:3128".into(),
+            network_https_proxy_uri: "http://proxy.example:3128".into(),
+            network_http_no_proxy: "localhost,127.0.0.1".into(),
+            ..Preferences::default()
+        });
+
+        assert!(preferences.network_http_proxy_uri.is_empty());
+        assert!(preferences.network_https_proxy_uri.is_empty());
+        assert!(preferences.network_http_no_proxy.is_empty());
+    }
+
+    #[test]
+    fn rustls_provider_install_is_idempotent() {
+        ensure_rustls_provider_installed();
+        ensure_rustls_provider_installed();
+
+        assert!(CryptoProvider::get_default().is_some());
+    }
 }

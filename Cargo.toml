@@ -9,6 +9,7 @@ unicode-width = "0.1.10"
 unicode-segmentation = "1.10.0"
 chrono = "0.4.23"
 dpi = "0.1.2"
+rustls = "0.23"
 servo = "0.1.0"
 url = "2.5.4"
 
