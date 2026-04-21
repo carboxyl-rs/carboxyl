@@ -126,35 +126,67 @@ impl Renderer {
     /// Draw the background from a pixel array encoded in RGBA8888
     pub fn draw_background(&mut self, pixels: &[u8], pixels_size: Size, rect: Rect) {
         let viewport = self.size.cast::<usize>();
+        let pixels_size = pixels_size.cast::<usize>();
+        let target = Size::new(viewport.width * 2, viewport.height * 4);
 
-        if pixels.len() < viewport.width * viewport.height * 8 * 4 {
+        if pixels_size.width == 0
+            || pixels_size.height == 0
+            || target.width == 0
+            || target.height == 0
+        {
+            return;
+        }
+
+        let expected = pixels_size.width * pixels_size.height * 4;
+        if pixels.len() < expected {
             log::debug!(
                 "unexpected size, actual: {}, expected: {}",
                 pixels.len(),
-                viewport.width * viewport.height * 8 * 4
+                expected
             );
             return;
         }
 
-        let origin = rect.origin.cast::<f32>().max(0.0) / (2.0, 4.0);
-        let size = rect.size.cast::<f32>().max(0.0) / (2.0, 4.0);
-        let top = (origin.y.floor() as usize).min(viewport.height);
-        let left = (origin.x.floor() as usize).min(viewport.width);
-        let right = ((origin.x + size.width).ceil() as usize)
-            .min(viewport.width)
-            .max(left);
-        let bottom = ((origin.y + size.height).ceil() as usize)
-            .min(viewport.height)
-            .max(top);
-        let row_length = pixels_size.width as usize;
-        let pixel = |x, y| {
+        let dirty_left =
+            ((rect.origin.x.max(0) as f32) * target.width as f32 / pixels_size.width as f32 / 2.0)
+                .floor() as usize;
+        let dirty_top = ((rect.origin.y.max(0) as f32) * target.height as f32
+            / pixels_size.height as f32
+            / 4.0)
+            .floor() as usize;
+        let dirty_right = (((rect.origin.x + rect.size.width as i32).max(0) as f32)
+            * target.width as f32
+            / pixels_size.width as f32
+            / 2.0)
+            .ceil() as usize;
+        let dirty_bottom = (((rect.origin.y + rect.size.height as i32).max(0) as f32)
+            * target.height as f32
+            / pixels_size.height as f32
+            / 4.0)
+            .ceil() as usize;
+
+        let top = dirty_top.min(viewport.height);
+        let left = dirty_left.min(viewport.width);
+        let right = dirty_right.min(viewport.width).max(left);
+        let bottom = dirty_bottom.min(viewport.height).max(top);
+        let row_length = pixels_size.width;
+        let sample = |target_x: usize, target_y: usize| {
+            let source_x = (((target_x as f32 + 0.5) * pixels_size.width as f32)
+                / target.width as f32)
+                .floor() as usize;
+            let source_y = (((target_y as f32 + 0.5) * pixels_size.height as f32)
+                / target.height as f32)
+                .floor() as usize;
+            let x = source_x.min(pixels_size.width - 1);
+            let y = source_y.min(pixels_size.height - 1);
+
             Color::new(
-                pixels[((x + y * row_length) * 4 + 2) as usize],
-                pixels[((x + y * row_length) * 4 + 1) as usize],
-                pixels[((x + y * row_length) * 4 + 0) as usize],
+                pixels[(x + y * row_length) * 4 + 2],
+                pixels[(x + y * row_length) * 4 + 1],
+                pixels[(x + y * row_length) * 4 + 0],
             )
         };
-        let pair = |x, y| pixel(x, y).avg_with(pixel(x, y + 1));
+        let pair = |x, y| sample(x, y).avg_with(sample(x, y + 1));
 
         for y in top..bottom {
             let index = (y + 1) * viewport.width;
@@ -280,5 +312,42 @@ impl Renderer {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bgra(r: u8, g: u8, b: u8) -> [u8; 4] {
+        [b, g, r, 255]
+    }
+
+    #[test]
+    fn draw_background_scales_full_framebuffer_into_viewport() {
+        let mut renderer = Renderer::new();
+        renderer.set_size(Size::new(2, 1));
+
+        let mut pixels = Vec::new();
+        for _y in 0..4 {
+            for x in 0..8 {
+                let color = if x < 4 {
+                    bgra(255, 0, 0)
+                } else {
+                    bgra(0, 0, 255)
+                };
+                pixels.extend_from_slice(&color);
+            }
+        }
+
+        renderer.draw_background(&pixels, Size::new(8, 4), Rect::new(0, 0, 8, 4));
+
+        let left = &renderer.cells[2].1;
+        let right = &renderer.cells[3].1;
+        let red = Color::new(255, 0, 0);
+        let blue = Color::new(0, 0, 255);
+
+        assert_eq!(left.quadrant, (red, red, red, red));
+        assert_eq!(right.quadrant, (blue, blue, blue, blue));
     }
 }
