@@ -6,7 +6,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
@@ -24,7 +24,7 @@ use url::Url;
 
 use crate::cli::{CommandLine, CommandLineProgram};
 use crate::gfx::{Rect, Size};
-use crate::input::{self, listen, Event, Key, TerminalEvent};
+use crate::input::{self, Event, Key, TerminalEvent, listen};
 use crate::output::{RenderThread, Window};
 use crate::ui::navigation::NavigationAction;
 use crate::utils::log;

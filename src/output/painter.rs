@@ -2,7 +2,7 @@ use std::io::{self, Stdout, Write};
 
 use crate::gfx::{Color, Point};
 
-use super::{binarize_quandrant, Cell};
+use super::{Cell, binarize_quandrant};
 
 pub struct Painter {
     output: Stdout,
@@ -25,10 +25,10 @@ impl Painter {
             foreground: None,
             background_code: None,
             foreground_code: None,
-            true_color: match std::env::var("COLORTERM").unwrap_or_default().as_str() {
-                "truecolor" | "24bit" => true,
-                _ => false,
-            },
+            true_color: matches!(
+                std::env::var("COLORTERM").unwrap_or_default().as_str(),
+                "truecolor" | "24bit"
+            ),
         }
     }
 
@@ -54,8 +54,10 @@ impl Painter {
             )?;
         }
 
-        self.output.write(self.buffer.as_slice())?;
+        // 👇 The important fix: handle full write
+        self.output.write_all(self.buffer.as_slice())?;
         self.output.flush()?;
+
         self.buffer.clear();
         self.cursor = None;
 
@@ -86,13 +88,12 @@ impl Painter {
             )
         } else {
             let (char, background, foreground) = binarize_quandrant(quadrant);
-
             (char, background, foreground, 1)
         };
 
         if self.cursor != Some(cursor) {
             write!(self.buffer, "\x1b[{};{}H", cursor.y + 1, cursor.x + 1)?;
-        };
+        }
 
         self.cursor = Some(cursor + Point::new(width, 0));
 
@@ -103,15 +104,14 @@ impl Painter {
                 write!(
                     self.buffer,
                     "\x1b[48;2;{};{};{}m",
-                    background.r, background.g, background.b,
-                )?
+                    background.r, background.g, background.b
+                )?;
             } else {
                 let code = background.to_xterm();
 
                 if self.background_code != Some(code) {
                     self.background_code = Some(code);
-
-                    write!(self.buffer, "\x1b[48;5;{code}m")?
+                    write!(self.buffer, "\x1b[48;5;{code}m")?;
                 }
             }
         }
@@ -123,15 +123,14 @@ impl Painter {
                 write!(
                     self.buffer,
                     "\x1b[38;2;{};{};{}m",
-                    foreground.r, foreground.g, foreground.b,
-                )?
+                    foreground.r, foreground.g, foreground.b
+                )?;
             } else {
                 let code = foreground.to_xterm();
 
                 if self.foreground_code != Some(code) {
                     self.foreground_code = Some(code);
-
-                    write!(self.buffer, "\x1b[38;5;{code}m")?
+                    write!(self.buffer, "\x1b[38;5;{code}m")?;
                 }
             }
         }
