@@ -41,14 +41,14 @@ macro_rules! impl_cast_trait {
         impl_cast_trait!($from);
 
         impl ToIntUnchecked<$from> for f32 {
-            unsafe fn to_int_unchecked(self) -> $from {
+            unsafe fn to_int_unchecked(self) -> $from { unsafe {
                 f32::to_int_unchecked(self)
-            }
+            }}
         }
         impl ToIntUnchecked<$from> for f64 {
-            unsafe fn to_int_unchecked(self) -> $from {
+            unsafe fn to_int_unchecked(self) -> $from { unsafe {
                 f64::to_int_unchecked(self)
-            }
+            }}
         }
     };
     ($from:ty as float) => {
@@ -330,9 +330,9 @@ macro_rules! impl_vector_traits {
             where
                 $type: super::ToIntUnchecked<U>,
                 U: Copy
-            {
+            { unsafe {
                 self.map(|x| <$type as super::ToIntUnchecked<U>>::to_int_unchecked(x))
-            }
+            }}
 
             pub fn mul_add<M, A>(&self, mul: M, add: A) -> Self
             where
