@@ -21,7 +21,7 @@ impl FourBits {
     pub fn new(x: bool, y: bool, z: bool, w: bool) -> Self {
         use FourBits::*;
 
-        match (x as u8) << 3 | (y as u8) << 2 | (z as u8) << 1 | (w as u8) << 0 {
+        match (x as u8) << 3 | (y as u8) << 2 | (z as u8) << 1 | (w as u8) {
             0b0000 => B0000,
             0b0001 => B0001,
             0b0010 => B0010,

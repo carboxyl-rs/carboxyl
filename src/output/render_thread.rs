@@ -22,6 +22,12 @@ enum Message {
     Shutdown,
 }
 
+impl Default for RenderThread {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RenderThread {
     pub fn new() -> Self {
         Self {

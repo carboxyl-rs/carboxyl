@@ -155,7 +155,7 @@ macro_rules! impl_vector_overload {
             }
         }
 
-        crate::impl_vector_traits!($struct Vector2);
+        $crate::impl_vector_traits!($struct Vector2);
     );
     ($struct:ident $x:ident $y:ident $z:ident) => (
         impl<T: Copy> $struct<T> {
@@ -291,7 +291,7 @@ macro_rules! impl_vector_traits {
             }
         }
 
-        crate::impl_vector_traits!($struct $vector i8);
+        $crate::impl_vector_traits!($struct $vector i8);
         crate::impl_vector_traits!($struct $vector u8);
         crate::impl_vector_traits!($struct $vector i16);
         crate::impl_vector_traits!($struct $vector u16);

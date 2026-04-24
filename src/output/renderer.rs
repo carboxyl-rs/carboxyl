@@ -22,6 +22,12 @@ pub struct Renderer {
     size: Size,
 }
 
+impl Default for Renderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Renderer {
     pub fn new() -> Renderer {
         Renderer {
@@ -183,7 +189,7 @@ impl Renderer {
             Color::new(
                 pixels[(x + y * row_length) * 4 + 2],
                 pixels[(x + y * row_length) * 4 + 1],
-                pixels[(x + y * row_length) * 4 + 0],
+                pixels[((x + y * row_length) * 4)],
             )
         };
         let pair = |x, y| sample(x, y).avg_with(sample(x, y + 1));
@@ -196,10 +202,10 @@ impl Renderer {
 
             for (_, cell) in &mut self.cells[start..end] {
                 cell.quadrant = (
-                    pair(x + 0, y + 0),
-                    pair(x + 1, y + 0),
+                    pair(x, y),
+                    pair(x + 1, y),
                     pair(x + 1, y + 2),
-                    pair(x + 0, y + 2),
+                    pair(x, y + 2),
                 );
 
                 x += 2;

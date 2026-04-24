@@ -328,15 +328,14 @@ impl Drop for StderrGuard {
             libc::close(self.saved_stderr);
         }
 
-        if let Some(path) = &self.log_path {
-            if self
+        if let Some(path) = &self.log_path
+            && self
                 .sink
                 .metadata()
                 .map(|metadata| metadata.len() > 0)
                 .unwrap_or(false)
-            {
-                eprintln!("carboxyl runtime logs were written to {}", path.display());
-            }
+        {
+            eprintln!("carboxyl runtime logs were written to {}", path.display());
         }
     }
 }
@@ -730,7 +729,7 @@ fn normalize_url(raw: Option<String>) -> AppResult<Url> {
 fn map_keyboard_event(key: &Key) -> Option<(ServoKeyboardEvent, ServoKeyboardEvent)> {
     let (logical_key, code, mut modifiers) = map_logical_key_and_code(key)?;
 
-    modifiers = modifiers | modifiers_from_input(&key.modifiers);
+    modifiers |= modifiers_from_input(&key.modifiers);
 
     Some((
         ServoKeyboardEvent::new_without_event(
@@ -796,7 +795,7 @@ fn map_logical_key_and_code(key: &Key) -> Option<(ServoKey, Code, ServoModifiers
             let ch = value as char;
             let code = character_code(ch)?;
 
-            Some((ServoKey::Character(ch.to_string().into()), code, modifiers))
+            Some((ServoKey::Character(ch.to_string()), code, modifiers))
         }
         _ => None,
     }
@@ -859,16 +858,16 @@ fn modifiers_from_input(modifiers: &crate::input::KeyModifiers) -> ServoModifier
     let mut mapped = ServoModifiers::empty();
 
     if modifiers.alt {
-        mapped = mapped | ServoModifiers::ALT;
+        mapped |= ServoModifiers::ALT;
     }
     if modifiers.control {
-        mapped = mapped | ServoModifiers::CONTROL;
+        mapped |= ServoModifiers::CONTROL;
     }
     if modifiers.meta {
-        mapped = mapped | ServoModifiers::META;
+        mapped |= ServoModifiers::META;
     }
     if modifiers.shift {
-        mapped = mapped | ServoModifiers::SHIFT;
+        mapped |= ServoModifiers::SHIFT;
     }
 
     mapped

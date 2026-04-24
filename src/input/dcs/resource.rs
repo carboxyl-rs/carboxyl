@@ -67,10 +67,10 @@ impl ResourceParser {
             let name = read_hex_string(self.name.as_slice());
             let value = read_hex_string(self.value.as_slice());
 
-            if let (Some(name), Some(value)) = (name, value) {
-                if name == "TN" {
-                    return Some(Event::Terminal(TerminalEvent::Name(value)));
-                }
+            if let (Some(name), Some(value)) = (name, value)
+                && name == "TN"
+            {
+                return Some(Event::Terminal(TerminalEvent::Name(value)));
             }
         }
 
@@ -79,7 +79,7 @@ impl ResourceParser {
 }
 
 fn read_hex_string(str: &[u8]) -> Option<String> {
-    let mut iter = str.into_iter();
+    let mut iter = str.iter();
     let mut vec = Vec::with_capacity(str.len() / 2);
 
     loop {

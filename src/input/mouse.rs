@@ -44,7 +44,7 @@ impl Mouse {
             }
         }
 
-        return Some(());
+        Some(())
     }
 
     fn get(&mut self, key: u8) -> Option<Event> {

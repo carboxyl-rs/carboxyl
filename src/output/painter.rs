@@ -15,6 +15,12 @@ pub struct Painter {
     foreground_code: Option<u8>,
 }
 
+impl Default for Painter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Painter {
     pub fn new() -> Painter {
         Painter {

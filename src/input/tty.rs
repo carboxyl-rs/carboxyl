@@ -71,10 +71,10 @@ impl TTY {
     fn stdin() -> TTY {
         let isatty = unsafe { libc::isatty(libc::STDIN_FILENO) };
 
-        if isatty != 1 {
-            if let Ok(file) = File::open("/dev/tty") {
-                return TTY::File(file);
-            }
+        if isatty != 1
+            && let Ok(file) = File::open("/dev/tty")
+        {
+            return TTY::File(file);
         }
 
         TTY::Raw(libc::STDIN_FILENO)

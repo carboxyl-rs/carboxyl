@@ -48,7 +48,7 @@ impl CommandLine {
         for arg in &args {
             let split: Vec<&str> = arg.split("=").collect();
             let default = arg.as_str();
-            let (key, value) = (split.get(0).unwrap_or(&default), split.get(1));
+            let (key, value) = (split.first().unwrap_or(&default), split.get(1));
 
             macro_rules! set {
                 ($var:ident, $enum:ident) => {{

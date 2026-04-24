@@ -32,6 +32,12 @@ pub struct Navigation {
     can_go_forward: bool,
 }
 
+impl Default for Navigation {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Navigation {
     pub fn new() -> Self {
         Self {
@@ -125,7 +131,7 @@ impl Navigation {
 
         self.cursor = None;
 
-        return match origin.x {
+        match origin.x {
             0..=2 => NavigationAction::GoBack(),
             3..=5 => NavigationAction::GoForward(),
             6..=8 => NavigationAction::Refresh(),
@@ -137,7 +143,7 @@ impl Navigation {
                 NavigationAction::Ignore
             }
             _ => NavigationAction::Ignore,
-        };
+        }
     }
     pub fn mouse_move(&mut self, _origin: Point) -> NavigationAction {
         NavigationAction::Forward
@@ -210,7 +216,7 @@ impl Navigation {
             for element in list {
                 let width = element.text.width() as i32;
 
-                elements.push((point.clone(), element));
+                elements.push((point, element));
 
                 point = point + (width, 0);
             }
