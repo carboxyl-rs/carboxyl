@@ -39,7 +39,7 @@ $ ./target/release/carbonyl https://example.com
 ## Build
 
 ```console
-$ ./scripts/build.sh
+$ cargo build --release
 ```
 
 The build is now a normal Cargo build for the `carbonyl` binary. The first build will download the published `servo` crate and its dependencies through Cargo.

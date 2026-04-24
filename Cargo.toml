@@ -1,19 +1,18 @@
 [package]
-name = "carbonyl"
+name = "carboxyl"
 version = "0.0.3"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 libc = "0.2"
-unicode-width = "0.1.10"
-unicode-segmentation = "1.10.0"
-chrono = "0.4.23"
+unicode-width = "0.2.2"
+unicode-segmentation = "1.13.2"
+chrono = "0.4.44"
 dpi = "0.1.2"
 rustls = "0.23"
 servo = "0.1.0"
-url = "2.5.4"
+url = "2.5.8"
 
 [lib]
-name = "carbonyl"
+name = "carboxyl"
 path = "src/lib.rs"
-crate-type = ["cdylib", "rlib"]

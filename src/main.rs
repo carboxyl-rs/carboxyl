@@ -1,3 +1,3 @@
 fn main() {
-    std::process::exit(carbonyl::browser::main());
+    std::process::exit(carboxyl::browser::main());
 }
