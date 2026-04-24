@@ -5,14 +5,10 @@ edition = "2024"
 
 [dependencies]
 libc = "0.2"
-unicode-width = "0.2.2"
-unicode-segmentation = "1.13.2"
-chrono = "0.4.44"
-dpi = "0.1.2"
+unicode-width = "0.2"
+unicode-segmentation = "1.13"
+chrono = "0.4"
+dpi = "0.1"
 rustls = "0.23"
-servo = "0.1.0"
-url = "2.5.8"
-
-[lib]
-name = "carboxyl"
-path = "src/lib.rs"
+servo = "0.1"
+url = "2.5"
