@@ -22,14 +22,14 @@ use servo::{
 };
 use url::Url;
 
-use crate::cli::{CommandLine, CommandLineProgram};
+use crate::cli::Cli;
 use crate::gfx::{Rect, Size};
 use crate::input::{self, Event, Key, TerminalEvent, listen};
 use crate::output::{RenderThread, Window};
 use crate::ui::navigation::NavigationAction;
 use crate::utils::log;
 
-type AppResult<T> = Result<T, Box<dyn Error>>;
+pub type AppResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct BrowserPoint {
@@ -340,23 +340,8 @@ impl Drop for StderrGuard {
     }
 }
 
-pub fn main() -> i32 {
-    let cmd = match CommandLineProgram::parse_or_run() {
-        None => return 0,
-        Some(cmd) => cmd,
-    };
-
-    match run(cmd) {
-        Ok(()) => 0,
-        Err(error) => {
-            eprintln!("{error}");
-            1
-        }
-    }
-}
-
-fn run(cmd: CommandLine) -> AppResult<()> {
-    let _stderr = StderrGuard::redirect(cmd.debug)?;
+pub fn run(cli: Cli) -> AppResult<()> {
+    let _stderr = StderrGuard::redirect(cli.debug)?;
     let _terminal = input::Terminal::setup();
     let (signal_tx, signal_rx) = mpsc::channel();
     let ui = Arc::new(SharedUi::new(signal_tx.clone()));
@@ -373,7 +358,7 @@ fn run(cmd: CommandLine) -> AppResult<()> {
 
     servo.setup_logging();
 
-    let url = normalize_url(extract_url(&cmd.args))?;
+    let url = normalize_url(cli.url.clone())?;
     let window = ui.window_snapshot();
     let rendering_context: Rc<dyn RenderingContext> = Rc::new(
         SoftwareRenderingContext::new(physical_size(window.browser)).map_err(|error| {
@@ -684,24 +669,6 @@ fn ensure_rustls_provider_installed() {
     }
 
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-}
-
-fn extract_url(args: &[String]) -> Option<String> {
-    let mut positional_only = false;
-
-    for arg in args {
-        if positional_only {
-            return Some(arg.clone());
-        }
-
-        match arg.as_str() {
-            "--" => positional_only = true,
-            value if value.starts_with('-') => continue,
-            _ => return Some(arg.clone()),
-        }
-    }
-
-    None
 }
 
 fn normalize_url(raw: Option<String>) -> AppResult<Url> {

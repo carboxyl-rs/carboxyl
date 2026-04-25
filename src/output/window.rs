@@ -1,7 +1,8 @@
+use clap::Parser;
 use core::mem::MaybeUninit;
 use std::str::FromStr;
 
-use crate::{cli::CommandLine, gfx::Size, utils::log};
+use crate::{cli::Cli, gfx::Size, utils::log};
 
 /// A terminal window.
 #[derive(Clone, Debug)]
@@ -15,7 +16,7 @@ pub struct Window {
     /// Size of the browser window in pixels
     pub browser: Size,
     /// Command line arguments
-    pub cmd: CommandLine,
+    pub cli: Cli,
 }
 
 impl Window {
@@ -26,7 +27,7 @@ impl Window {
             scale: (0.0, 0.0).into(),
             cells: (0, 0).into(),
             browser: (0, 0).into(),
-            cmd: CommandLine::parse(),
+            cli: Cli::parse(),
         };
 
         window.update();
@@ -77,7 +78,7 @@ impl Window {
             term.height = rows;
         }
 
-        let zoom = 1.5 * self.cmd.zoom;
+        let zoom = self.cli.zoom as f32 * 1.5;
         let cells = Size::new(term.width.max(1), term.height.max(2) - 1);
         let auto_scale = false;
         let cell_pixels = if auto_scale {

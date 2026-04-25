@@ -4,7 +4,8 @@ use std::{
     time::Instant,
 };
 
-use crate::cli::CommandLine;
+use crate::cli::Cli;
+use clap::Parser;
 
 use super::{FrameSync, Renderer};
 
@@ -63,8 +64,8 @@ impl RenderThread {
 
     /// Boot the rendering thread, contains a simple event loop.
     fn boot(rx: Receiver<Message>) {
-        let cmd = CommandLine::parse();
-        let mut sync = FrameSync::new(cmd.fps);
+        let cli = Cli::parse();
+        let mut sync = FrameSync::new(cli.fps as f32);
         let mut renderer = Renderer::new();
         let mut needs_render = false;
 
