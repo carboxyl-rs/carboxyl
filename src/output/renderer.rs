@@ -189,7 +189,7 @@ impl Renderer {
             Color::new(
                 pixels[(x + y * row_length) * 4 + 2],
                 pixels[(x + y * row_length) * 4 + 1],
-                pixels[((x + y * row_length) * 4)],
+                pixels[(x + y * row_length) * 4 ],
             )
         };
         let pair = |x, y| sample(x, y).avg_with(sample(x, y + 1));

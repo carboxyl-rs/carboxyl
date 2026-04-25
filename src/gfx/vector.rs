@@ -237,7 +237,7 @@ macro_rules! impl_vector_overload {
             }
         }
 
-        crate::impl_vector_traits!($struct Vector3);
+        $crate::impl_vector_traits!($struct Vector3);
     );
 }
 
@@ -292,7 +292,7 @@ macro_rules! impl_vector_traits {
         }
 
         $crate::impl_vector_traits!($struct $vector i8);
-        crate::impl_vector_traits!($struct $vector u8);
+        $crate::impl_vector_traits!($struct $vector u8);
         crate::impl_vector_traits!($struct $vector i16);
         crate::impl_vector_traits!($struct $vector u16);
         crate::impl_vector_traits!($struct $vector i32);
