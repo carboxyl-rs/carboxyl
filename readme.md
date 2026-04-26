@@ -3,11 +3,11 @@
     <tr>
       <td>
         <pre>
-   OC
-     \
-OC —— Fe —— CO
-     /  \
-   OC    CO</pre>
+      O
+     ||
+R — C
+      \
+       OH</pre>
       </td>
       <td><h1>Carboxyl</h1></td>
     </tr>
@@ -27,13 +27,13 @@ The project keeps the existing terminal UI, input parser, navigation bar, and ce
 ## Usage
 
 ```console
-$ cargo run --release --bin carbonyl -- https://example.com
+$ cargo run --release -- https://example.com
 ```
 
 Or after building:
 
 ```console
-$ ./target/release/carbonyl https://example.com
+$ ./target/release/carboxyl https://example.com
 ```
 
 ## Build
@@ -42,7 +42,7 @@ $ ./target/release/carbonyl https://example.com
 $ cargo build --release
 ```
 
-The build is now a normal Cargo build for the `carbonyl` binary. The first build will download the published `servo` crate and its dependencies through Cargo.
+The build is now a normal Cargo build for the `carboxyl` binary. The first build will download the published `servo` crate and its dependencies through Cargo.
 
 ## Runtime Architecture
 
