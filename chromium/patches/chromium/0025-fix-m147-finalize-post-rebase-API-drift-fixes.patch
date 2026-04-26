@@ -15,7 +15,7 @@ Fixes land-in-one-commit for simplicity; can be squashed into the
 original rebase history later if desired:
 
 - viz software_output_device_proxy.cc: ResourceSizes::MaybeSizeInBytes
-  → SinglePlaneFormat::MaybeEstimatedSizeInBytes (M147 API)
+  → SharedMemorySizeForSharedImageFormat (M147 API)
 - browser_interface_binders.cc: Mojo BinderMap::Add signature change
   (BindRepeating → template helper)
 - headless/BUILD.gn: remove phantom //carbonyl/src/browser:carbonyl
@@ -47,24 +47,24 @@ diff --git a/components/viz/service/display_embedder/software_output_device_prox
 index 427d9bb4e4d05..e6ab20cf4d2ce 100644
 --- a/components/viz/service/display_embedder/software_output_device_proxy.cc
 +++ b/components/viz/service/display_embedder/software_output_device_proxy.cc
-@@ -4,7 +4,6 @@
+@@ -4,8 +4,8 @@
  #include "base/threading/thread_checker.h"
  #include "base/trace_event/trace_event.h"
  #include "build/build_config.h"
 -#include "components/viz/common/resources/resource_sizes.h"
  #include "components/viz/common/resources/shared_image_format.h"
++#include "components/viz/common/resources/shared_image_format_utils.h"
  #include "mojo/public/cpp/system/platform_handle.h"
  #include "services/viz/privileged/mojom/compositing/layered_window_updater.mojom.h"
-@@ -89,12 +88,14 @@ void SoftwareOutputDeviceProxy::OnSwapBuffers(
+@@ -89,12 +89,13 @@ void SoftwareOutputDeviceProxy::OnSwapBuffers(
  void SoftwareOutputDeviceProxy::ResizeDelegated() {
    canvas_.reset();
  
 -  size_t required_bytes;
 -  if (!ResourceSizes::MaybeSizeInBytes(
 -          viewport_pixel_size_, SinglePlaneFormat::kRGBA_8888, &required_bytes)) {
-+  std::optional<size_t> maybe_bytes =
-+      SinglePlaneFormat::kRGBA_8888.MaybeEstimatedSizeInBytes(
-+          viewport_pixel_size_);
++  std::optional<size_t> maybe_bytes = SharedMemorySizeForSharedImageFormat(
++      SinglePlaneFormat::kRGBA_8888, viewport_pixel_size_);
 +  if (!maybe_bytes) {
      DLOG(ERROR) << "Invalid viewport size " << viewport_pixel_size_.ToString();
      return;
@@ -176,7 +176,7 @@ index 58ec2d2f02218..30299c55ade71 100644
        [&](TextShadowPaintPhase phase) {
          for (wtf_size_t i = 0; i < decoration_info.AppliedDecorationCount();
 diff --git a/third_party/blink/renderer/platform/fonts/font.cc b/third_party/blink/renderer/platform/fonts/font.cc
-index d2e45b29e133e..1506951578204 100644
+index ec516dbac1140..b27648f7de1b9 100644
 --- a/third_party/blink/renderer/platform/fonts/font.cc
 +++ b/third_party/blink/renderer/platform/fonts/font.cc
 @@ -24,6 +24,7 @@
@@ -187,7 +187,7 @@ index d2e45b29e133e..1506951578204 100644
  #include "cc/paint/paint_flags.h"
  #include "third_party/blink/renderer/platform/fonts/character_range.h"
  #include "third_party/blink/renderer/platform/fonts/font_cache.h"
-@@ -92,129 +93,6 @@ bool Font::operator==(const Font& other) const {
+@@ -92,126 +93,6 @@ bool Font::operator==(const Font& other) const {
           font_description_ == other.font_description_;
  }
  
@@ -275,9 +275,6 @@ index d2e45b29e133e..1506951578204 100644
 -    return;
 -
 -  if (!carbonyl::Bridge::BitmapMode()) {
--    // M135: TextRunPaintInfo is now constructed locally; original M111 patch
--    // assumed it was a function parameter.
--    TextRunPaintInfo run_info(run);
 -    auto string = StringView(
 -      run_info.run.ToStringView(),
 -      run_info.from,
@@ -317,6 +314,32 @@ index d2e45b29e133e..1506951578204 100644
  void Font::DrawText(cc::PaintCanvas* canvas,
                      const TextFragmentPaintInfo& text_info,
                      const gfx::PointF& point,
+@@ -224,11 +105,10 @@ void Font::DrawText(cc::PaintCanvas* canvas,
+     return;
+ 
+   if (!carbonyl::Bridge::BitmapMode()) {
+-    auto string = StringView(
+-      text_info.text,
+-      text_info.from,
+-      text_info.Length()
+-    ).ToString().Utf8();
++    auto string =
++        StringView(text_info.text, text_info.from, text_info.Length())
++            .ToString()
++            .Utf8();
+     auto base64 = base::Base64Encode(string);
+ 
+     // Bypass HarfBuzz text shaping for the Carbonyl Skia back-end
+@@ -248,7 +128,8 @@ void Font::DrawText(cc::PaintCanvas* canvas,
+     return;
+   }
+ 
+-  ShapeResultBloberizer::FillGlyphsNG bloberizer(
++  // For performance avoid stack initialization on this large object.
++  STACK_UNINITIALIZED ShapeResultBloberizer::FillGlyphsNG bloberizer(
+       GetFontDescription(), text_info.text, text_info.from, text_info.to,
+       text_info.shape_result,
+       draw_type == Font::DrawType::kGlyphsOnly
 diff --git a/third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.cc b/third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.cc
 index 485d344066cc7..7808663e7ac17 100644
 --- a/third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.cc
