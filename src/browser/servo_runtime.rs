@@ -10,13 +10,11 @@ use std::thread;
 use std::time::Duration;
 
 use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode, KeyModifiers,
+    DisableMouseCapture, EnableMouseCapture,
     poll as ct_poll, read as ct_read,
 };
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use dpi::PhysicalSize;
 use ratatui::layout::{Constraint, Layout};
-use ratatui::widgets::Widget;
 use ratatui::{DefaultTerminal, Frame};
 use rustls::crypto::CryptoProvider;
 use servo::{
