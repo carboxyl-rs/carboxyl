@@ -1,0 +1,33 @@
+From e5e6f0e1fd7208aa6ef3f23f6e41fca60976488d Mon Sep 17 00:00:00 2001
+From: Joseph Magly <1159087+jmagly@users.noreply.github.com>
+Date: Sat, 4 Apr 2026 01:56:59 -0400
+Subject: [PATCH 16/25] fix(viz): replace ResourceFormat with SinglePlaneFormat
+ in M120
+
+ResourceFormat::RGBA_8888 was replaced with SinglePlaneFormat::kRGBA_8888
+in M120 as part of the shared image format refactor.
+---
+ .../service/display_embedder/software_output_device_proxy.cc   | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/components/viz/service/display_embedder/software_output_device_proxy.cc b/components/viz/service/display_embedder/software_output_device_proxy.cc
+index a61668050cf0e..c76e94705b67a 100644
+--- a/components/viz/service/display_embedder/software_output_device_proxy.cc
++++ b/components/viz/service/display_embedder/software_output_device_proxy.cc
+@@ -5,6 +5,7 @@
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
+ #include "components/viz/common/resources/resource_sizes.h"
++#include "components/viz/common/resources/shared_image_format.h"
+ #include "components/viz/service/display_embedder/output_device_backing.h"
+ #include "mojo/public/cpp/system/platform_handle.h"
+ #include "services/viz/privileged/mojom/compositing/layered_window_updater.mojom.h"
+@@ -91,7 +92,7 @@ void SoftwareOutputDeviceProxy::ResizeDelegated() {
+ 
+   size_t required_bytes;
+   if (!ResourceSizes::MaybeSizeInBytes(
+-          viewport_pixel_size_, ResourceFormat::RGBA_8888, &required_bytes)) {
++          viewport_pixel_size_, SinglePlaneFormat::kRGBA_8888, &required_bytes)) {
+     DLOG(ERROR) << "Invalid viewport size " << viewport_pixel_size_.ToString();
+     return;
+   }

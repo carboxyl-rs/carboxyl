@@ -1,40 +1,45 @@
-From c960c9b1f7ef3f16b27e4eaa4896e3563c88ea91 Mon Sep 17 00:00:00 2001
+From 5884c7e817ae07beec7d1adcf956f783052eeb49 Mon Sep 17 00:00:00 2001
 From: Fathy Boundjadj <hey@fathy.fr>
 Date: Thu, 9 Feb 2023 03:27:27 +0100
-Subject: [PATCH 04/14] Setup browser default settings
+Subject: [PATCH 04/25] Setup browser default settings
 
 ---
- headless/public/headless_browser.cc | 4 ++--
- headless/public/headless_browser.h  | 4 ++--
- 2 files changed, 4 insertions(+), 4 deletions(-)
+ headless/lib/browser/headless_browser_impl.cc | 8 ++++++--
+ headless/public/headless_browser.h            | 4 ++--
+ 2 files changed, 8 insertions(+), 4 deletions(-)
 
-diff --git a/headless/public/headless_browser.cc b/headless/public/headless_browser.cc
-index b6c70ecb0fc23..c836a082d2e68 100644
---- a/headless/public/headless_browser.cc
-+++ b/headless/public/headless_browser.cc
-@@ -22,14 +22,14 @@ namespace headless {
- 
+diff --git a/headless/lib/browser/headless_browser_impl.cc b/headless/lib/browser/headless_browser_impl.cc
+index eb1a52ac99254..17f063e1c55a2 100644
+--- a/headless/lib/browser/headless_browser_impl.cc
++++ b/headless/lib/browser/headless_browser_impl.cc
+@@ -70,7 +70,11 @@ namespace headless {
  namespace {
+ 
  // Product name for building the default user agent string.
 -const char kHeadlessProductName[] = "HeadlessChrome";
 +const char kHeadlessProductName[] = "Google Chrome";
- constexpr gfx::Size kDefaultWindowSize(800, 600);
++constexpr gfx::Size kDefaultWindowSize(800, 600);
++
++constexpr gfx::FontRenderParams::Hinting kDefaultFontRenderHinting =
++    gfx::FontRenderParams::Hinting::HINTING_FULL;
  
- constexpr gfx::FontRenderParams::Hinting kDefaultFontRenderHinting =
-     gfx::FontRenderParams::Hinting::HINTING_FULL;
+ #if defined(HEADLESS_USE_PREFS)
+ const base::FilePath::CharType kLocalStateFilename[] =
+@@ -96,7 +100,7 @@ bool HeadlessBrowser::Options::DevtoolsServerEnabled() {
  
- std::string GetProductNameAndVersion() {
+ /// static
+ std::string HeadlessBrowser::GetProductNameAndVersion() {
 -  return std::string(kHeadlessProductName) + "/" + PRODUCT_VERSION;
 +  return std::string(kHeadlessProductName) + "/" + PRODUCT_VERSION + " (Carbonyl)";
  }
- }  // namespace
  
+ /// static
 diff --git a/headless/public/headless_browser.h b/headless/public/headless_browser.h
-index 48efaa7d57ca2..afc0236147519 100644
+index 2669a6bb8ca2b..7d9329763da7b 100644
 --- a/headless/public/headless_browser.h
 +++ b/headless/public/headless_browser.h
-@@ -176,10 +176,10 @@ struct HEADLESS_EXPORT HeadlessBrowser::Options {
-   base::FilePath user_data_dir;
+@@ -123,10 +123,10 @@ struct HEADLESS_EXPORT HeadlessBrowser::Options {
+   base::FilePath disk_cache_dir;
  
    // Run a browser context in an incognito mode. Enabled by default.
 -  bool incognito_mode = true;

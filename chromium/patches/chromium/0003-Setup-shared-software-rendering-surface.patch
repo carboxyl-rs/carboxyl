@@ -1,25 +1,25 @@
-From eea9662f4ba08a655057143d320e4e692fd92469 Mon Sep 17 00:00:00 2001
+From 390becc800745867517d5d6aa6dd6e8db569e6ee Mon Sep 17 00:00:00 2001
 From: Fathy Boundjadj <hey@fathy.fr>
 Date: Thu, 9 Feb 2023 03:24:29 +0100
-Subject: [PATCH 03/14] Setup shared software rendering surface
+Subject: [PATCH 03/25] Setup shared software rendering surface
 
 ---
- components/viz/host/host_display_client.cc       |  4 +++-
- components/viz/host/host_display_client.h        |  6 ++++--
- .../viz/host/layered_window_updater_impl.cc      |  2 +-
- .../viz/host/layered_window_updater_impl.h       |  2 +-
- .../output_surface_provider_impl.cc              | 16 ++++++++++++++++
- .../compositor/viz_process_transport_factory.cc  |  4 +++-
- .../mojom/compositing/display_private.mojom      |  1 -
- .../compositing/layered_window_updater.mojom     |  2 +-
- ui/compositor/compositor.h                       | 16 ++++++++++++++++
- 9 files changed, 45 insertions(+), 8 deletions(-)
+ components/viz/host/host_display_client.cc      |  4 +++-
+ components/viz/host/host_display_client.h       |  6 ++++--
+ .../viz/host/layered_window_updater_impl.cc     |  2 +-
+ .../viz/host/layered_window_updater_impl.h      |  2 +-
+ .../output_surface_provider_impl.cc             | 16 ++++++++++++++++
+ .../compositor/viz_process_transport_factory.cc |  5 ++++-
+ .../mojom/compositing/display_private.mojom     |  1 -
+ .../compositing/layered_window_updater.mojom    |  2 +-
+ ui/compositor/compositor.h                      | 17 ++++++++++++++++-
+ 9 files changed, 46 insertions(+), 9 deletions(-)
 
 diff --git a/components/viz/host/host_display_client.cc b/components/viz/host/host_display_client.cc
-index 6d905b62e6258..bfb803829c73b 100644
+index b153c538488b7..24eeb948567af 100644
 --- a/components/viz/host/host_display_client.cc
 +++ b/components/viz/host/host_display_client.cc
-@@ -47,9 +47,9 @@ void HostDisplayClient::OnDisplayReceivedCALayerParams(
+@@ -49,9 +49,9 @@ void HostDisplayClient::OnDisplayReceivedCALayerParams(
  }
  #endif
  
@@ -30,7 +30,7 @@ index 6d905b62e6258..bfb803829c73b 100644
    if (!NeedsToUseLayerWindow(widget_)) {
      DLOG(ERROR) << "HWND shouldn't be using a layered window";
      return;
-@@ -57,7 +57,9 @@ void HostDisplayClient::CreateLayeredWindowUpdater(
+@@ -59,7 +59,9 @@ void HostDisplayClient::CreateLayeredWindowUpdater(
  
    layered_window_updater_ =
        std::make_unique<LayeredWindowUpdaterImpl>(widget_, std::move(receiver));
@@ -41,7 +41,7 @@ index 6d905b62e6258..bfb803829c73b 100644
      gpu::SurfaceHandle child_window) {
    NOTREACHED();
 diff --git a/components/viz/host/host_display_client.h b/components/viz/host/host_display_client.h
-index 5eeaadec9773f..f3409f0eeda03 100644
+index 03410160827d5..ff48d8d6a203e 100644
 --- a/components/viz/host/host_display_client.h
 +++ b/components/viz/host/host_display_client.h
 @@ -47,11 +47,13 @@ class VIZ_HOST_EXPORT HostDisplayClient : public mojom::DisplayClient {
@@ -53,18 +53,18 @@ index 5eeaadec9773f..f3409f0eeda03 100644
    void AddChildWindowToBrowser(gpu::SurfaceHandle child_window) override;
  #endif
  
-+  protected:
++ protected:
 +  void CreateLayeredWindowUpdater(
 +      mojo::PendingReceiver<mojom::LayeredWindowUpdater> receiver) override;
 +
- // TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
- // of lacros-chrome is complete.
- #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+ #if BUILDFLAG(IS_LINUX) && BUILDFLAG(SUPPORTS_OZONE_X11)
+   void DidCompleteSwapWithNewSize(const gfx::Size& size) override;
+ #endif  // BUILDFLAG(IS_LINUX) && BUILDFLAG(SUPPORTS_OZONE_X11)
 diff --git a/components/viz/host/layered_window_updater_impl.cc b/components/viz/host/layered_window_updater_impl.cc
-index 271486b45dcc8..a62210d8ca3c8 100644
+index 36b9e09ca63ae..a0552011f89ba 100644
 --- a/components/viz/host/layered_window_updater_impl.cc
 +++ b/components/viz/host/layered_window_updater_impl.cc
-@@ -44,7 +44,7 @@ void LayeredWindowUpdaterImpl::OnAllocatedSharedMemory(
+@@ -46,7 +46,7 @@ void LayeredWindowUpdaterImpl::OnAllocatedSharedMemory(
    // |region|'s handle will close when it goes out of scope.
  }
  
@@ -87,18 +87,18 @@ index 8af69cac78b74..9f74e511c263d 100644
   private:
    const HWND hwnd_;
 diff --git a/components/viz/service/display_embedder/output_surface_provider_impl.cc b/components/viz/service/display_embedder/output_surface_provider_impl.cc
-index d8f25c1435d4b..2929ebd3887c2 100644
+index 07502f4ff2afd..e7d422a18a0b2 100644
 --- a/components/viz/service/display_embedder/output_surface_provider_impl.cc
 +++ b/components/viz/service/display_embedder/output_surface_provider_impl.cc
 @@ -16,6 +16,7 @@
+ #include "base/task/single_thread_task_runner.h"
  #include "build/build_config.h"
  #include "build/chromecast_buildflags.h"
- #include "build/chromeos_buildflags.h"
-+#include "carbonyl/src/browser/software_output_device_proxy.h"
++#include "carbonyl/src/viz/carbonyl_software_output_device.h"
  #include "cc/base/switches.h"
  #include "components/viz/common/display/renderer_settings.h"
- #include "components/viz/common/frame_sinks/begin_frame_source.h"
-@@ -29,6 +30,7 @@
+ #include "components/viz/common/features.h"
+@@ -30,6 +31,7 @@
  #include "gpu/command_buffer/service/scheduler_sequence.h"
  #include "gpu/config/gpu_finch_features.h"
  #include "gpu/ipc/common/surface_handle.h"
@@ -106,7 +106,7 @@ index d8f25c1435d4b..2929ebd3887c2 100644
  #include "ui/base/ui_base_switches.h"
  
  #if BUILDFLAG(IS_WIN)
-@@ -134,10 +136,24 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
+@@ -137,10 +139,24 @@ std::unique_ptr<OutputSurface> OutputSurfaceProviderImpl::CreateOutputSurface(
    }
  }
  
@@ -124,7 +124,7 @@ index d8f25c1435d4b..2929ebd3887c2 100644
 +    mojo::PendingRemote<mojom::LayeredWindowUpdater> layered_window_updater;
 +    display_client->CreateLayeredWindowUpdater(
 +        layered_window_updater.InitWithNewPipeAndPassReceiver());
-+    return std::make_unique<SoftwareOutputDeviceProxy>(
++    return std::make_unique<carbonyl::CarbonylSoftwareOutputDevice>(
 +        std::move(layered_window_updater));
 +  }
 +// #endif
@@ -132,19 +132,20 @@ index d8f25c1435d4b..2929ebd3887c2 100644
      return std::make_unique<SoftwareOutputDevice>();
  
 diff --git a/content/browser/compositor/viz_process_transport_factory.cc b/content/browser/compositor/viz_process_transport_factory.cc
-index 3b44531f2618f..fae71c1c19a4f 100644
+index 59a7d48453bc4..56f9a86435e2f 100644
 --- a/content/browser/compositor/viz_process_transport_factory.cc
 +++ b/content/browser/compositor/viz_process_transport_factory.cc
-@@ -53,6 +53,8 @@
- #include "ui/gfx/win/rendering_window_manager.h"
+@@ -59,6 +59,9 @@
+ #include "ui/display/mac/display_link_mac.h"
  #endif
  
 +#include "carbonyl/src/browser/host_display_client.h"
 +
++
  namespace content {
  namespace {
  
-@@ -400,7 +402,7 @@ void VizProcessTransportFactory::OnEstablishedGpuChannel(
+@@ -407,7 +410,7 @@ void VizProcessTransportFactory::OnEstablishedGpuChannel(
    root_params->display_private =
        display_private.BindNewEndpointAndPassReceiver();
    compositor_data.display_client =
@@ -154,10 +155,10 @@ index 3b44531f2618f..fae71c1c19a4f 100644
        compositor_data.display_client->GetBoundRemote(resize_task_runner_);
    mojo::AssociatedRemote<viz::mojom::ExternalBeginFrameController>
 diff --git a/services/viz/privileged/mojom/compositing/display_private.mojom b/services/viz/privileged/mojom/compositing/display_private.mojom
-index 52f44a31de4a8..65b938d76e430 100644
+index 00bd84b857fbd..18c4391ba498f 100644
 --- a/services/viz/privileged/mojom/compositing/display_private.mojom
 +++ b/services/viz/privileged/mojom/compositing/display_private.mojom
-@@ -103,7 +103,6 @@ interface DisplayClient {
+@@ -130,7 +130,6 @@ interface DisplayClient {
  
    // Creates a LayeredWindowUpdater implementation to draw into a layered
    // window.
@@ -177,18 +178,19 @@ index 2f462f0deb5fc..695869b83cefa 100644
 +  Draw(gfx.mojom.Rect damage_rect) => ();
  };
 diff --git a/ui/compositor/compositor.h b/ui/compositor/compositor.h
-index 50cea82c6b477..f024e6013bfb9 100644
+index 97f26777528c3..5cd3fac8e78c6 100644
 --- a/ui/compositor/compositor.h
 +++ b/ui/compositor/compositor.h
-@@ -87,6 +87,7 @@ class DisplayPrivate;
+@@ -88,7 +88,7 @@ namespace mojom {
+ class DisplayPrivate;
  class ExternalBeginFrameController;
  }  // namespace mojom
- class ContextProvider;
+-
 +class HostDisplayClient;
  class HostFrameSinkManager;
  class LocalSurfaceId;
  class RasterContextProvider;
-@@ -143,6 +144,16 @@ class COMPOSITOR_EXPORT ContextFactory {
+@@ -136,6 +136,16 @@ class COMPOSITOR_EXPORT ContextFactory {
    virtual viz::HostFrameSinkManager* GetHostFrameSinkManager() = 0;
  };
  
@@ -202,10 +204,10 @@ index 50cea82c6b477..f024e6013bfb9 100644
 +  virtual ~CompositorDelegate() {}
 +};
 +
- // Compositor object to take care of GPU painting.
- // A Browser compositor object is responsible for generating the final
- // displayable form of pixels comprising a single widget's contents. It draws an
-@@ -186,6 +197,9 @@ class COMPOSITOR_EXPORT Compositor : public base::PowerSuspendObserver,
+ // Factory object to create a ExternalBeginFrameControllerClient on demand.
+ class COMPOSITOR_EXPORT ExternalBeginFrameControllerClientFactory {
+  public:
+@@ -190,6 +200,9 @@ class COMPOSITOR_EXPORT Compositor : public base::PowerSuspendObserver,
    // Schedules a redraw of the layer tree associated with this compositor.
    void ScheduleDraw();
  
@@ -215,9 +217,9 @@ index 50cea82c6b477..f024e6013bfb9 100644
    // Sets the root of the layer tree drawn by this Compositor. The root layer
    // must have no parent. The compositor's root layer is reset if the root layer
    // is destroyed. NULL can be passed to reset the root layer, in which case the
-@@ -503,6 +517,8 @@ class COMPOSITOR_EXPORT Compositor : public base::PowerSuspendObserver,
- 
-   std::unique_ptr<PendingBeginFrameArgs> pending_begin_frame_args_;
+@@ -632,6 +645,8 @@ class COMPOSITOR_EXPORT Compositor : public base::PowerSuspendObserver,
+       simple_begin_frame_observers_;
+   std::unique_ptr<ui::HostBeginFrameObserver> host_begin_frame_observer_;
  
 +  CompositorDelegate* delegate_ = nullptr;
 +

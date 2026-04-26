@@ -1,13 +1,13 @@
-From 0ed9a390f25d73492ce1170ce229b95772fd458d Mon Sep 17 00:00:00 2001
+From c8cc1c207d3f366e62f486147f007b447d6eddf5 Mon Sep 17 00:00:00 2001
 From: Fathy Boundjadj <hey@fathy.fr>
 Date: Thu, 9 Feb 2023 03:20:50 +0100
-Subject: [PATCH 01/14] Add Carbonyl library
+Subject: [PATCH 01/25] Add Carbonyl library
 
 ---
  carbonyl/build    |  1 +
  carbonyl/src      |  1 +
- headless/BUILD.gn | 15 ++++++++++++++-
- 3 files changed, 16 insertions(+), 1 deletion(-)
+ headless/BUILD.gn | 11 +++++++++++
+ 3 files changed, 13 insertions(+)
  create mode 120000 carbonyl/build
  create mode 120000 carbonyl/src
 
@@ -28,18 +28,18 @@ index 0000000000000..dabb0e15a991e
 +../../../src
 \ No newline at end of file
 diff --git a/headless/BUILD.gn b/headless/BUILD.gn
-index bfae1e3290de0..8018111ed9898 100644
+index c5ba46a82b4f4..c81027ddbcb67 100644
 --- a/headless/BUILD.gn
 +++ b/headless/BUILD.gn
-@@ -453,6 +453,7 @@ component("headless_non_renderer") {
+@@ -382,6 +382,7 @@ source_set("headless_browser") {
+     "//base:base_static",
      "//build:branding_buildflags",
-     "//build:branding_buildflags",
-     "//build:chromeos_buildflags",
+     "//build/config/linux/dbus:buildflags",
 +    "//carbonyl/src/browser:carbonyl",
      "//components/cookie_config",
-     "//components/crash/core/common:common",
      "//components/embedder_support",
-@@ -993,13 +994,25 @@ static_library("headless_shell_lib") {
+     "//components/embedder_support:user_agent",
+@@ -921,6 +922,15 @@ if (should_strip_binary) {
  }
  
  executable("headless_shell") {
@@ -55,14 +55,11 @@ index bfae1e3290de0..8018111ed9898 100644
    configs -= [ "//build/config/compiler:thinlto_optimize_default" ]
    configs += [ "//build/config/compiler:thinlto_optimize_max" ]
  
-   sources = [ "app/headless_shell_main.cc" ]
-   defines = []
- 
--  deps = [ ":headless_shell_lib" ]
-+  deps = [
-+    ":headless_shell_lib",
+@@ -934,6 +944,7 @@ executable("headless_shell") {
+   deps = [
+     ":headless_shell_lib",
+     "//build:branding_buildflags",
 +    "//carbonyl/src/browser:carbonyl",
-+  ]
- 
-   if (!headless_use_embedded_resources) {
-     data = [
+     "//components/os_crypt/common:switches",
+     "//components/version_info",
+     "//content/public/app",

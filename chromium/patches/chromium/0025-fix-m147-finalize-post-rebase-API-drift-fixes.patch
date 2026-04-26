@@ -1,0 +1,363 @@
+From 38c55f8d3968cf44e05f67f874828c3a3c3b0f77 Mon Sep 17 00:00:00 2001
+From: Joseph Magly <1159087+jmagly@users.noreply.github.com>
+Date: Tue, 21 Apr 2026 03:55:33 -0400
+Subject: [PATCH 25/25] fix(m147): finalize post-rebase API drift fixes
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+These are the build fixes mentioned in carbonyl rebase commit
+(58e50bd) that were applied to the working tree but never committed.
+Committing now so patches.sh save captures them into the canonical
+patch set.
+
+Fixes land-in-one-commit for simplicity; can be squashed into the
+original rebase history later if desired:
+
+- viz software_output_device_proxy.cc: ResourceSizes::MaybeSizeInBytes
+  → SinglePlaneFormat::MaybeEstimatedSizeInBytes (M147 API)
+- browser_interface_binders.cc: Mojo BinderMap::Add signature change
+  (BindRepeating → template helper)
+- headless/BUILD.gn: remove phantom //carbonyl/src/browser:carbonyl
+  dep (target doesn't exist; was leftover from earlier rebase)
+- headless_browser_impl.cc: resolve merge conflict + add
+  navigation_controller.h; PlatformSetWebContentsBounds →
+  SetWebContentsBounds; zoom_controller include
+- headless_screen.cc: remove duplicate ~HeadlessScreen; fix brace
+  placement for IsHeadless()
+- headless_web_contents_impl.h: using WebContentsObserver::
+  OnVisibilityChanged to resolve virtual overload hiding
+- text_decoration_painter.cc: (void)skip_ink suppression
+- font.cc: remove dead Font::DrawText(TextRun) overloads
+  (CachingWordShaper/ShapeResultBuffer removed in M147)
+- paint_artifact_compositor.cc: remove orphan debug dump function
+---
+ .../software_output_device_proxy.cc           |   9 +-
+ content/browser/browser_interface_binders.cc  |   4 +-
+ headless/BUILD.gn                             |   1 -
+ headless/lib/browser/headless_browser_impl.cc |   8 +-
+ headless/lib/browser/headless_screen.cc       |   4 +-
+ .../lib/browser/headless_web_contents_impl.h  |   1 +
+ .../core/paint/text_decoration_painter.cc     |   1 +
+ .../blink/renderer/platform/fonts/font.cc     | 124 +-----------------
+ .../compositing/paint_artifact_compositor.cc  |  33 -----
+ 9 files changed, 15 insertions(+), 170 deletions(-)
+
+diff --git a/components/viz/service/display_embedder/software_output_device_proxy.cc b/components/viz/service/display_embedder/software_output_device_proxy.cc
+index 427d9bb4e4d05..e6ab20cf4d2ce 100644
+--- a/components/viz/service/display_embedder/software_output_device_proxy.cc
++++ b/components/viz/service/display_embedder/software_output_device_proxy.cc
+@@ -4,7 +4,6 @@
+ #include "base/threading/thread_checker.h"
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
+-#include "components/viz/common/resources/resource_sizes.h"
+ #include "components/viz/common/resources/shared_image_format.h"
+ #include "mojo/public/cpp/system/platform_handle.h"
+ #include "services/viz/privileged/mojom/compositing/layered_window_updater.mojom.h"
+@@ -89,12 +88,14 @@ void SoftwareOutputDeviceProxy::OnSwapBuffers(
+ void SoftwareOutputDeviceProxy::ResizeDelegated() {
+   canvas_.reset();
+ 
+-  size_t required_bytes;
+-  if (!ResourceSizes::MaybeSizeInBytes(
+-          viewport_pixel_size_, SinglePlaneFormat::kRGBA_8888, &required_bytes)) {
++  std::optional<size_t> maybe_bytes =
++      SinglePlaneFormat::kRGBA_8888.MaybeEstimatedSizeInBytes(
++          viewport_pixel_size_);
++  if (!maybe_bytes) {
+     DLOG(ERROR) << "Invalid viewport size " << viewport_pixel_size_.ToString();
+     return;
+   }
++  size_t required_bytes = *maybe_bytes;
+ 
+   base::UnsafeSharedMemoryRegion region =
+       base::UnsafeSharedMemoryRegion::Create(required_bytes);
+diff --git a/content/browser/browser_interface_binders.cc b/content/browser/browser_interface_binders.cc
+index d2102f1f5674f..51e8c22914af7 100644
+--- a/content/browser/browser_interface_binders.cc
++++ b/content/browser/browser_interface_binders.cc
+@@ -944,8 +944,8 @@ void PopulateBinderMapWithContext(
+           &RenderFrameHostImpl::CreateWebTransportConnector>);
+ 
+   map->Add<carbonyl::mojom::CarbonylRenderService>(
+-      base::BindRepeating(&RenderFrameHostImpl::GetCarbonylRenderService,
+-                          base::Unretained(host)));
++      &BindRenderFrameHostImpl<
++          &RenderFrameHostImpl::GetCarbonylRenderService>);
+ 
+   // BrowserMainLoop::GetInstance() may be null on unit tests.
+   if (BrowserMainLoop::GetInstance()) {
+diff --git a/headless/BUILD.gn b/headless/BUILD.gn
+index 5f18761c89f03..340d6af249b46 100644
+--- a/headless/BUILD.gn
++++ b/headless/BUILD.gn
+@@ -947,7 +947,6 @@ executable("headless_shell") {
+     ":headless_shell_lib",
+     "//carbonyl/src/browser:renderer",
+     "//build:branding_buildflags",
+-    "//carbonyl/src/browser:carbonyl",
+     "//components/os_crypt/common:switches",
+     "//components/version_info",
+     "//content/public/app",
+diff --git a/headless/lib/browser/headless_browser_impl.cc b/headless/lib/browser/headless_browser_impl.cc
+index f1ba2b6b74d24..34df4b0541e8c 100644
+--- a/headless/lib/browser/headless_browser_impl.cc
++++ b/headless/lib/browser/headless_browser_impl.cc
+@@ -18,13 +18,11 @@
+ #include "base/task/single_thread_task_runner.h"
+ #include "build/config/linux/dbus/buildflags.h"
+ #include "components/embedder_support/user_agent_utils.h"
+-<<<<<<< HEAD
++#include "components/input/native_web_keyboard_event.h"
+ #include "components/os_crypt/async/browser/os_crypt_async.h"
+ #include "components/os_crypt/async/common/encryptor.h"
+-=======
+-#include "components/input/native_web_keyboard_event.h"
+->>>>>>> fix(m135): Path B build fixes — disable b64 text capture
+ #include "components/version_info/version_info.h"
++#include "content/public/browser/navigation_controller.h"
+ #include "components/zoom/zoom_controller.h"
+ #include "content/public/browser/browser_task_traits.h"
+ #include "content/public/browser/browser_thread.h"
+@@ -319,7 +317,7 @@ void HeadlessBrowserImpl::Resize() {
+         continue;
+       }
+ 
+-      PlatformSetWebContentsBounds(impl, rect);
++      SetWebContentsBounds(impl, rect);
+     }
+   }
+ }
+diff --git a/headless/lib/browser/headless_screen.cc b/headless/lib/browser/headless_screen.cc
+index 6d548b1ef87f0..8c484af7376c0 100644
+--- a/headless/lib/browser/headless_screen.cc
++++ b/headless/lib/browser/headless_screen.cc
+@@ -34,8 +34,6 @@ HeadlessScreen* HeadlessScreen::Create(const gfx::Size& window_size,
+   return new HeadlessScreen(window_size, screen_info_spec);
+ }
+ 
+-HeadlessScreen::~HeadlessScreen() = default;
+-
+ #if !BUILDFLAG(IS_MAC)
+ gfx::Point HeadlessScreen::GetCursorScreenPoint() {
+   return gfx::Point();
+@@ -91,6 +89,8 @@ void HeadlessScreen::Resize() {
+     display.SetScaleAndBounds(dpi, ScaleToEnclosedRect(bounds, dpi));
+     ProcessDisplayChanged(display, true /* is_primary */);
+   }
++}
++
+ bool HeadlessScreen::IsHeadless() const {
+   return true;
+ }
+diff --git a/headless/lib/browser/headless_web_contents_impl.h b/headless/lib/browser/headless_web_contents_impl.h
+index b5dc04b653d6a..b28317c7d9524 100644
+--- a/headless/lib/browser/headless_web_contents_impl.h
++++ b/headless/lib/browser/headless_web_contents_impl.h
+@@ -105,6 +105,7 @@ class HEADLESS_EXPORT HeadlessWebContentsImpl
+                   FrameFinishedCallback frame_finished_callback);
+ 
+   // HeadlessWindowDelegate:
++  using content::WebContentsObserver::OnVisibilityChanged;
+   void OnVisibilityChanged() override;
+   void OnBoundsChanged(const gfx::Rect& old_bounds) override;
+   void OnWindowStateChanged(HeadlessWindowState old_window_state) override;
+diff --git a/third_party/blink/renderer/core/paint/text_decoration_painter.cc b/third_party/blink/renderer/core/paint/text_decoration_painter.cc
+index 58ec2d2f02218..30299c55ade71 100644
+--- a/third_party/blink/renderer/core/paint/text_decoration_painter.cc
++++ b/third_party/blink/renderer/core/paint/text_decoration_painter.cc
+@@ -153,6 +153,7 @@ void TextDecorationPainter::PaintUnderOrOverLineDecorations(
+   const TextDecorationOffset decoration_offset(style_);
+   const ETextDecorationSkipInk skip_ink =
+       decoration_info.TargetStyle().TextDecorationSkipInk();
++  (void)skip_ink;  // carbonyl: underline/overline painting disabled
+   PaintWithTextShadow(
+       [&](TextShadowPaintPhase phase) {
+         for (wtf_size_t i = 0; i < decoration_info.AppliedDecorationCount();
+diff --git a/third_party/blink/renderer/platform/fonts/font.cc b/third_party/blink/renderer/platform/fonts/font.cc
+index d2e45b29e133e..1506951578204 100644
+--- a/third_party/blink/renderer/platform/fonts/font.cc
++++ b/third_party/blink/renderer/platform/fonts/font.cc
+@@ -24,6 +24,7 @@
+ 
+ #include "third_party/blink/renderer/platform/fonts/font.h"
+ 
++#include "cc/paint/paint_canvas.h"
+ #include "cc/paint/paint_flags.h"
+ #include "third_party/blink/renderer/platform/fonts/character_range.h"
+ #include "third_party/blink/renderer/platform/fonts/font_cache.h"
+@@ -92,129 +93,6 @@ bool Font::operator==(const Font& other) const {
+          font_description_ == other.font_description_;
+ }
+ 
+-namespace {
+-
+-void DrawBlobs(cc::PaintCanvas* canvas,
+-               const cc::PaintFlags& flags,
+-               const ShapeResultBloberizer::BlobBuffer& blobs,
+-               const gfx::PointF& point,
+-               cc::NodeId node_id = cc::kInvalidNodeId) {
+-  if (!carbonyl::Bridge::BitmapMode()) {
+-    return;
+-  }
+-
+-  for (const auto& blob_info : blobs) {
+-    DCHECK(blob_info.blob);
+-    cc::PaintCanvasAutoRestore auto_restore(canvas, false);
+-    switch (blob_info.rotation) {
+-      case CanvasRotationInVertical::kRegular:
+-        break;
+-      case CanvasRotationInVertical::kRotateCanvasUpright: {
+-        canvas->save();
+-
+-        SkMatrix m;
+-        m.setSinCos(-1, 0, point.x(), point.y());
+-        canvas->concat(SkM44(m));
+-        break;
+-      }
+-      case CanvasRotationInVertical::kRotateCanvasUprightOblique: {
+-        canvas->save();
+-
+-        SkMatrix m;
+-        m.setSinCos(-1, 0, point.x(), point.y());
+-        // TODO(yosin): We should use angle specified in CSS instead of
+-        // constant value -15deg.
+-        // Note: We draw glyph in right-top corner upper.
+-        // See CSS "transform: skew(0, -15deg)"
+-        SkMatrix skewY;
+-        constexpr SkScalar kSkewY = -0.2679491924311227;  // tan(-15deg)
+-        skewY.setSkew(0, kSkewY, point.x(), point.y());
+-        m.preConcat(skewY);
+-        canvas->concat(SkM44(m));
+-        break;
+-      }
+-      case CanvasRotationInVertical::kOblique: {
+-        // TODO(yosin): We should use angle specified in CSS instead of
+-        // constant value 15deg.
+-        // Note: We draw glyph in right-top corner upper.
+-        // See CSS "transform: skew(0, -15deg)"
+-        canvas->save();
+-        SkMatrix skewX;
+-        constexpr SkScalar kSkewX = 0.2679491924311227;  // tan(15deg)
+-        skewX.setSkew(kSkewX, 0, point.x(), point.y());
+-        canvas->concat(SkM44(skewX));
+-        break;
+-      }
+-    }
+-    if (node_id != cc::kInvalidNodeId) {
+-      canvas->drawTextBlob(blob_info.blob, point.x(), point.y(), node_id, flags);
+-    } else {
+-      canvas->drawTextBlob(blob_info.blob, point.x(), point.y(), flags);
+-    }
+-  }
+-}
+-
+-}  // anonymous ns
+-
+-void Font::DrawText(cc::PaintCanvas* canvas,
+-                    const TextRun& run,
+-                    const gfx::PointF& point,
+-                    const cc::PaintFlags& flags,
+-                    DrawType draw_type) const {
+-  DrawText(canvas, run, point, cc::kInvalidNodeId, flags, draw_type);
+-}
+-
+-void Font::DrawText(cc::PaintCanvas* canvas,
+-                    const TextRun& run,
+-                    const gfx::PointF& point,
+-                    cc::NodeId node_id,
+-                    const cc::PaintFlags& flags,
+-                    DrawType draw_type) const {
+-  // Don't draw anything while we are using custom fonts that are in the process
+-  // of loading.
+-  if (ShouldSkipDrawing())
+-    return;
+-
+-  if (!carbonyl::Bridge::BitmapMode()) {
+-    // M135: TextRunPaintInfo is now constructed locally; original M111 patch
+-    // assumed it was a function parameter.
+-    TextRunPaintInfo run_info(run);
+-    auto string = StringView(
+-      run_info.run.ToStringView(),
+-      run_info.from,
+-      run_info.to - run_info.from
+-    ).ToString().Utf8();
+-    auto base64 = base::Base64Encode(string);
+-
+-    // Bypass HarfBuzz text shaping for the Carbonyl Skia back-end
+-    auto blob = SkTextBlob::MakeFromString(
+-      base64.c_str(),
+-      PrimaryFont()->
+-        PlatformData().
+-        CreateSkFont(&font_description_)
+-    );
+-
+-    if (node_id != cc::kInvalidNodeId) {
+-      canvas->drawTextBlob(blob, point.x(), point.y(), node_id, flags);
+-    } else {
+-      canvas->drawTextBlob(blob, point.x(), point.y(), flags);
+-    }
+-
+-    return;
+-  }
+-
+-  CachingWordShaper word_shaper(*this);
+-  ShapeResultBuffer buffer;
+-  word_shaper.FillResultBuffer(run, &buffer);
+-  TextRunPaintInfo run_info(run);
+-  ShapeResultBloberizer::FillGlyphs bloberizer(
+-      GetFontDescription(), run_info, buffer,
+-      draw_type == Font::DrawType::kGlyphsOnly
+-          ? ShapeResultBloberizer::Type::kNormal
+-          : ShapeResultBloberizer::Type::kEmitText);
+-  DrawBlobs(canvas, flags, bloberizer.Blobs(), point, node_id);
+-}
+-
+ void Font::DrawText(cc::PaintCanvas* canvas,
+                     const TextFragmentPaintInfo& text_info,
+                     const gfx::PointF& point,
+diff --git a/third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.cc b/third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.cc
+index 485d344066cc7..7808663e7ac17 100644
+--- a/third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.cc
++++ b/third_party/blink/renderer/platform/graphics/compositing/paint_artifact_compositor.cc
+@@ -393,39 +393,6 @@ cc::Layer* ForeignLayer(const PaintChunk& chunk,
+   return foreign_layer ? foreign_layer->GetLayer() : nullptr;
+ }
+ 
+-void DumpWithDifferingPaintPropertiesIncluded(const PaintChunk& previous,
+-                                              const PaintChunk& repainted) {
+-  SCOPED_CRASH_KEY_STRING1024(
+-      "PrevTransform", "json",
+-      previous.properties.Transform().ToJSON()->ToJSONString().Utf8());
+-  SCOPED_CRASH_KEY_STRING1024(
+-      "PrevClip", "json",
+-      previous.properties.Clip().ToJSON()->ToJSONString().Utf8());
+-  SCOPED_CRASH_KEY_STRING1024(
+-      "PrevEffect", "json",
+-      previous.properties.Effect().ToJSON()->ToJSONString().Utf8());
+-  SCOPED_CRASH_KEY_STRING1024(
+-      "RepaintTransform", "json",
+-      repainted.properties.Transform().ToJSON()->ToJSONString().Utf8());
+-  SCOPED_CRASH_KEY_STRING1024(
+-      "RepaintClip", "json",
+-      repainted.properties.Clip().ToJSON()->ToJSONString().Utf8());
+-  SCOPED_CRASH_KEY_STRING1024(
+-      "RepaintEffect", "json",
+-      repainted.properties.Effect().ToJSON()->ToJSONString().Utf8());
+-
+-  // This id is not useful on its own, but can be correlated to objects
+-  // in a heap dump.
+-  SCOPED_CRASH_KEY_STRING32("ChunkId", "id", previous.id.ToString().Utf8());
+-
+-  base::debug::DumpWithoutCrashing();
+-
+-  // DCHECK added to facilitate detection by ClusterFuzz.
+-  DCHECK(false) << "Paint Property Tree State differs for Paint Chunk: "
+-                << "Missing call to PaintArtifactCompositor::"
+-                << "SetNeedsUpdate?";
+-}
+-
+ // True if the paint chunk change affects the result of |Update|, such as the
+ // compositing decisions in |CollectPendingLayers|. This will return false for
+ // repaint updates that can be handled by |UpdateRepaintedLayers|, such as
