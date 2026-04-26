@@ -294,7 +294,7 @@ macro_rules! impl_vector_traits {
         $crate::impl_vector_traits!($struct $vector i8);
         $crate::impl_vector_traits!($struct $vector u8);
         $crate::impl_vector_traits!($struct $vector i16);
-        crate::impl_vector_traits!($struct $vector u16);
+        $crate::impl_vector_traits!($struct $vector u16);
         crate::impl_vector_traits!($struct $vector i32);
         crate::impl_vector_traits!($struct $vector u32);
         crate::impl_vector_traits!($struct $vector i64);

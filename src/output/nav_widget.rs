@@ -44,12 +44,11 @@ impl NavState {
                     // Left
                     0x14 => self.cursor = Some(cursor.saturating_sub(1)),
                     // Backspace
-                    0x7f => {
-                        if cursor > 0 && cursor <= self.url.len() {
+                    0x7f
+                        if cursor > 0 && cursor <= self.url.len() => {
                             self.url.remove(cursor - 1);
                             self.cursor = Some(cursor - 1);
                         }
-                    }
                     // Printable ASCII
                     c if (0x20..0x7f).contains(&c) => {
                         self.url.insert(cursor, c as char);
