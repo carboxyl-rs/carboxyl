@@ -4,12 +4,15 @@ version = "0.0.3"
 edition = "2024"
 
 [dependencies]
-libc = "0.2"
 unicode-width = "0.2"
-unicode-segmentation = "1.13"
-chrono = "0.4"
-dpi = "0.1"
+# unused unicode-segmentation = "1.13"
 rustls = "0.23"
 servo = "0.1"
 url = "2.5"
 clap = { version = "4", features = ["derive"] }
+ratatui = "0.30"
+rustix = { version = "1", features = ["termios", "stdio", "fs", "process"] }
+dpi = "0.1"
+libc = "0.2"                                                                 # only for one call :( try extinguishing it
+crossterm = "0.29.0"
+chrono = "0.4"                                                               # temporary plss

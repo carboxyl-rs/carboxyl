@@ -1,5 +1,7 @@
-Fix inverted colors;
+Fix:
+- Pages are just rendering bg color;
+- Ctrl-C ain't working;
+
 Fix some clippy warnings;
-Refactor gfx module (that u8 color looks strange);
-Try refactoring browser module (that one is kinda messy; some channel failures are being silenced);
-Look for another things to refactor in that code;
+Clarification for ui module;
+Look for another things to refactor in that code (why are there so many hardcoded stuff and complex solutions when we could just import a crate);
