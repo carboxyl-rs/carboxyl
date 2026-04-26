@@ -37,4 +37,8 @@ fi
 
 cd "$CHROMIUM_SRC/out/$target"
 
-ninja headless:headless_shell "$@"
+# Build the runtime binary plus the graphics libraries copied into packaged output.
+ninja headless:headless_shell \
+    libEGL.so libGLESv2.so \
+    libvk_swiftshader.so libvulkan.so.1 \
+    "$@"

@@ -1,83 +1,75 @@
-From 792e123bb57b1b379b0367b2568302e2cb0dc3c9 Mon Sep 17 00:00:00 2001
+From 0601565030be9202fd7a1aabe72dbf6b606c6d79 Mon Sep 17 00:00:00 2001
 From: Fathy Boundjadj <hey@fathy.fr>
 Date: Thu, 9 Feb 2023 03:32:30 +0100
-Subject: [PATCH 09/14] Bridge browser into Carbonyl library
+Subject: [PATCH 09/25] Bridge browser into Carbonyl library
 
 ---
- headless/app/headless_shell.cc                |  33 +-
+ headless/app/headless_shell.cc                |  31 +-
  headless/app/headless_shell_main.cc           |   5 +
- headless/lib/browser/headless_browser_impl.cc | 406 +++++++++++++++++-
- headless/lib/browser/headless_browser_impl.h  |  16 +
- .../lib/browser/headless_web_contents_impl.cc |  28 ++
- .../lib/browser/headless_web_contents_impl.h  |   2 +
- 6 files changed, 462 insertions(+), 28 deletions(-)
+ headless/lib/browser/headless_browser_impl.cc | 410 +++++++++++++++++-
+ headless/lib/browser/headless_browser_impl.h  |  27 ++
+ .../lib/browser/headless_web_contents_impl.cc |  32 ++
+ .../lib/browser/headless_web_contents_impl.h  |  11 +-
+ 6 files changed, 488 insertions(+), 28 deletions(-)
 
 diff --git a/headless/app/headless_shell.cc b/headless/app/headless_shell.cc
-index e08385b9cf740..5b51c22ae1da3 100644
+index 59e464014960f..99e05ebd19e82 100644
 --- a/headless/app/headless_shell.cc
 +++ b/headless/app/headless_shell.cc
 @@ -4,6 +4,8 @@
  
- #include "headless/app/headless_shell.h"
+ #include "headless/public/headless_shell.h"
  
 +#include "carbonyl/src/browser/bridge.h"
 +
  #include <memory>
  
  #include "base/base_switches.h"
-@@ -90,6 +92,8 @@ void HeadlessShell::OnBrowserStart(HeadlessBrowser* browser) {
+@@ -105,6 +107,8 @@ void HeadlessShell::OnBrowserStart(HeadlessBrowser* browser) {
    HeadlessBrowserContext::Builder context_builder =
        browser_->CreateBrowserContextBuilder();
  
 +  context_builder.SetWindowSize(carbonyl::Renderer::Main()->GetSize());
 +
-   // Retrieve the locale set by InitApplicationLocale() in
-   // headless_content_main_delegate.cc in a way that is free of side-effects.
-   context_builder.SetAcceptLanguage(base::i18n::GetConfiguredLocale());
-@@ -113,39 +117,14 @@ void HeadlessShell::OnBrowserStart(HeadlessBrowser* browser) {
- 
+   // Create browser context and set it as the default. The default browser
+   // context is used by the Target.createTarget() DevTools command when no other
+   // context is given.
+@@ -136,31 +140,8 @@ void HeadlessShell::OnBrowserStart(HeadlessBrowser* browser) {
    GURL target_url = ConvertArgumentToURL(args.front());
- 
--  // If driven by a debugger just open the target page and
--  // leave expecting the debugger will do what they need.
--  if (IsRemoteDebuggingEnabled()) {
--    HeadlessWebContents::Builder builder(
--        browser_context_->CreateWebContentsBuilder());
+   HeadlessWebContents::Builder builder(
+       browser_context->CreateWebContentsBuilder());
+-
+-  // Check for headless commands and instantiate headless command handler
+-  // that will execute the commands against the target page.
+-#if defined(HEADLESS_ENABLE_COMMANDS)
+-  if (HeadlessCommandHandler::HasHeadlessCommandSwitches(command_line)) {
+-    GURL handler_url = HeadlessCommandHandler::GetHandlerUrl();
 -    HeadlessWebContents* web_contents =
--        builder.SetInitialURL(target_url).Build();
+-        builder.SetInitialURL(handler_url).Build();
 -    if (!web_contents) {
--      LOG(ERROR) << "Navigation to " << target_url << " failed.";
+-      LOG(ERROR) << "Navigation to " << handler_url << " failed.";
 -      ShutdownSoon();
+-      return;
 -    }
+-
+-    HeadlessCommandHandler::ProcessCommands(
+-        HeadlessWebContentsImpl::From(web_contents)->web_contents(),
+-        std::move(target_url),
+-        base::BindOnce(&HeadlessShell::OnProcessCommandsDone,
+-                       base::Unretained(this)));
 -    return;
 -  }
+-#endif
 -
--  // Otherwise instantiate headless shell command handler that will
--  // execute the commands against the target page.
--#if defined(HEADLESS_ENABLE_COMMANDS)
--  GURL handler_url = HeadlessCommandHandler::GetHandlerUrl();
-   HeadlessWebContents::Builder builder(
-       browser_context_->CreateWebContentsBuilder());
-   HeadlessWebContents* web_contents =
--      builder.SetInitialURL(handler_url).Build();
+-  // Otherwise just open the target page.
+-  HeadlessWebContents* web_contents = builder.SetInitialURL(target_url).Build();
++  HeadlessWebContents* web_contents =
 +      builder.SetInitialURL(target_url).Build();
    if (!web_contents) {
--    LOG(ERROR) << "Navigation to " << handler_url << " failed.";
-+    LOG(ERROR) << "Navigation to " << target_url << " failed.";
+     LOG(ERROR) << "Navigation to " << target_url << " failed.";
      ShutdownSoon();
--    return;
-   }
--
--  HeadlessCommandHandler::ProcessCommands(
--      HeadlessWebContentsImpl::From(web_contents)->web_contents(),
--      std::move(target_url),
--      base::BindOnce(&HeadlessShell::ShutdownSoon, weak_factory_.GetWeakPtr()));
--#endif
- }
- 
- void HeadlessShell::ShutdownSoon() {
 diff --git a/headless/app/headless_shell_main.cc b/headless/app/headless_shell_main.cc
-index 35736145f5caf..f9b8bac5c18a5 100644
+index f8287680cfea4..203b06489e0e4 100644
 --- a/headless/app/headless_shell_main.cc
 +++ b/headless/app/headless_shell_main.cc
 @@ -13,7 +13,12 @@
@@ -90,11 +82,11 @@ index 35736145f5caf..f9b8bac5c18a5 100644
  int main(int argc, const char** argv) {
 +  carbonyl_shell_main();
 +
+   content::ContentMainParams params(nullptr);
  #if BUILDFLAG(IS_WIN)
    sandbox::SandboxInterfaceInfo sandbox_info = {nullptr};
-   content::InitializeSandboxInfo(&sandbox_info);
 diff --git a/headless/lib/browser/headless_browser_impl.cc b/headless/lib/browser/headless_browser_impl.cc
-index 1a1223108be6d..fd45d215479ab 100644
+index 17f063e1c55a2..3fd1a6d12f6e6 100644
 --- a/headless/lib/browser/headless_browser_impl.cc
 +++ b/headless/lib/browser/headless_browser_impl.cc
 @@ -7,6 +7,8 @@
@@ -104,11 +96,11 @@ index 1a1223108be6d..fd45d215479ab 100644
 +#include <iostream>
 +#include <signal.h>
  
- #include "base/callback_helpers.h"
- #include "base/command_line.h"
-@@ -27,6 +29,23 @@
- #include "services/network/public/cpp/network_switches.h"
- #include "ui/events/devices/device_data_manager.h"
+ #include "base/compiler_specific.h"
+ #include "base/functional/callback.h"
+@@ -65,6 +67,23 @@
+ #include "components/variations/service/variations_service.h"  // nogncheck
+ #endif
  
 +#include "content/public/browser/render_frame_host.h"
 +#include "content/public/browser/render_view_host.h"
@@ -129,10 +121,10 @@ index 1a1223108be6d..fd45d215479ab 100644
 +
  namespace headless {
  
- HeadlessBrowserImpl::HeadlessBrowserImpl(
-@@ -38,7 +57,15 @@ HeadlessBrowserImpl::HeadlessBrowserImpl(
-       default_browser_context_(nullptr),
-       agent_host_(nullptr) {}
+ namespace {
+@@ -133,7 +152,15 @@ HeadlessBrowserImpl::HeadlessBrowserImpl(
+     : on_start_callback_(std::move(on_start_callback)),
+       platform_delegate_(std::make_unique<HeadlessPlatformDelegate>()) {}
  
 -HeadlessBrowserImpl::~HeadlessBrowserImpl() = default;
 +HeadlessBrowserImpl::~HeadlessBrowserImpl() {
@@ -145,10 +137,10 @@ index 1a1223108be6d..fd45d215479ab 100644
 +  }
 +}
  
- HeadlessBrowserContext::Builder
- HeadlessBrowserImpl::CreateBrowserContextBuilder() {
-@@ -91,6 +118,307 @@ void HeadlessBrowserImpl::set_browser_main_parts(
-   browser_main_parts_ = browser_main_parts;
+ void HeadlessBrowserImpl::SetOptions(HeadlessBrowser::Options options) {
+   options_ = std::move(options);
+@@ -272,6 +299,311 @@ bool HeadlessBrowserImpl::ShouldStartDevToolsServer() {
+   return true;
  }
  
 +void HeadlessBrowserImpl::Resize() {
@@ -183,7 +175,7 @@ index 1a1223108be6d..fd45d215479ab 100644
 +      }
 +
 +      auto& nav = impl->web_contents()->GetController();
-+      
++
 +      nav.Reload(content::ReloadType::NORMAL, true);
 +    }
 +  }
@@ -195,7 +187,7 @@ index 1a1223108be6d..fd45d215479ab 100644
 +  }
 +
 +  auto ctxs = GetAllBrowserContexts();
-+  
++
 +  if (ctxs.empty()) {
 +    return;
 +  }
@@ -206,13 +198,16 @@ index 1a1223108be6d..fd45d215479ab 100644
 +    return;
 +  }
 +
-+  auto* ctx = ctxs[0];
-+  auto contents = ctx->GetAllWebContents();
++  for (auto* ctx: ctxs) {
++    for (auto* contents: ctx->GetAllWebContents()) {
++      auto* impl = HeadlessWebContentsImpl::From(contents);
 +
-+  if (contents.empty()) {
-+    ctx->CreateWebContentsBuilder().SetInitialURL(url).Build();
-+  } else {
-+    HeadlessWebContentsImpl::From(contents[0])->OpenURL(url);
++      if (!impl) {
++        continue;
++      }
++
++      impl->OpenURL(url);
++    }
 +  }
 +}
 +
@@ -226,13 +221,14 @@ index 1a1223108be6d..fd45d215479ab 100644
 +      }
 +
 +      auto& nav = impl->web_contents()->GetController();
-+      
++
 +      if (nav.CanGoBack()) {
 +        nav.GoBack();
 +      }
 +    }
 +  }
 +}
++
 +void HeadlessBrowserImpl::OnGoForwardInput() {
 +  for (auto* ctx: GetAllBrowserContexts()) {
 +    for (auto* contents: ctx->GetAllWebContents()) {
@@ -243,7 +239,7 @@ index 1a1223108be6d..fd45d215479ab 100644
 +      }
 +
 +      auto& nav = impl->web_contents()->GetController();
-+      
++
 +      if (nav.CanGoForward()) {
 +        nav.GoForward();
 +      }
@@ -312,7 +308,7 @@ index 1a1223108be6d..fd45d215479ab 100644
 +      blink::WebKeyboardEvent::Type::kRawKeyDown,
 +      blink::WebInputEvent::kNoModifiers,
 +      base::TimeTicks::Now());
-+  
++
 +  // TODO(fathy): support IME
 +  switch (key) {
 +    case 0x11:
@@ -452,12 +448,12 @@ index 1a1223108be6d..fd45d215479ab 100644
 +  }
 +}
 +
- void HeadlessBrowserImpl::RunOnStartCallback() {
-   // We don't support the tethering domain on this agent host.
-   agent_host_ = content::DevToolsAgentHost::CreateForBrowser(
-@@ -98,6 +426,82 @@ void HeadlessBrowserImpl::RunOnStartCallback() {
+ void HeadlessBrowserImpl::PreMainMessageLoopRun() {
+   CreateOSCryptAsync();
  
-   PlatformStart();
+@@ -284,6 +616,82 @@ void HeadlessBrowserImpl::PreMainMessageLoopRun() {
+   platform_delegate_->Start();
+ 
    std::move(on_start_callback_).Run(this);
 +
 +  signal(SIGWINCH, [](int signal) {
@@ -537,23 +533,31 @@ index 1a1223108be6d..fd45d215479ab 100644
 +  });
  }
  
- HeadlessBrowserContext* HeadlessBrowserImpl::CreateBrowserContext(
+ void HeadlessBrowserImpl::WillRunMainMessageLoop(base::RunLoop& run_loop) {
 diff --git a/headless/lib/browser/headless_browser_impl.h b/headless/lib/browser/headless_browser_impl.h
-index a2d531ab32ff5..963808352c0c4 100644
+index 1d9ba1861de00..eed25b81f39c6 100644
 --- a/headless/lib/browser/headless_browser_impl.h
 +++ b/headless/lib/browser/headless_browser_impl.h
-@@ -11,6 +11,7 @@
+@@ -8,6 +8,7 @@
  #include <memory>
  #include <string>
  #include <vector>
 +#include <thread>
  
+ #include "base/memory/raw_ptr.h"
  #include "base/memory/weak_ptr.h"
- #include "base/task/single_thread_task_runner.h"
-@@ -121,9 +122,24 @@ class HEADLESS_EXPORT HeadlessBrowserImpl : public HeadlessBrowser,
+@@ -112,6 +113,32 @@ class HEADLESS_EXPORT HeadlessBrowserImpl : public HeadlessBrowser {
    policy::PolicyService* GetPolicyService();
  #endif
  
++#if BUILDFLAG(IS_MAC)
++  device::GeolocationSystemPermissionManager*
++  GetGeolocationSystemPermissionManager();
++  void SetGeolocationSystemPermissionManagerForTesting(
++      std::unique_ptr<device::GeolocationSystemPermissionManager>
++          geolocation_system_permission_manager);
++#endif
++
 +  void Resize();
 +  void OnShutdownInput();
 +  void OnRefreshInput();
@@ -566,45 +570,58 @@ index a2d531ab32ff5..963808352c0c4 100644
 +  void OnMouseDownInput(unsigned int x, unsigned int y);
 +  void OnMouseMoveInput(unsigned int x, unsigned int y);
 +
-   bool did_shutdown() const { return did_shutdown_; }
- 
-  protected:
++  bool did_shutdown() const { return did_shutdown_; }
++
++ protected:
 + // TODO: use base::TaskRunner
 +  std::thread input_thread_;
 +
- #if BUILDFLAG(IS_MAC)
-   std::unique_ptr<display::ScopedNativeScreen> screen_;
- #endif
+  private:
+   void CreateOSCryptAsync();
+ 
 diff --git a/headless/lib/browser/headless_web_contents_impl.cc b/headless/lib/browser/headless_web_contents_impl.cc
-index 010ff2c94287e..fad8c3fdd2bfe 100644
+index ae616fa9c3524..e886771cdaa70 100644
 --- a/headless/lib/browser/headless_web_contents_impl.cc
 +++ b/headless/lib/browser/headless_web_contents_impl.cc
-@@ -8,6 +8,7 @@
+@@ -9,6 +9,7 @@
  #include <string>
  #include <utility>
  #include <vector>
 +#include <iostream>
  
- #include "base/bind.h"
+ #include "base/check_deref.h"
  #include "base/command_line.h"
-@@ -21,10 +22,13 @@
+@@ -21,13 +22,17 @@
+ #include "base/trace_event/trace_event.h"
  #include "base/values.h"
  #include "build/build_config.h"
- #include "build/chromeos_buildflags.h"
 +#include "carbonyl/src/browser/bridge.h"
+ #include "components/headless/console_message_logger/headless_console_message_logger.h"
+ #include "components/optimization_guide/content/browser/page_content_proto_provider.h"
+ #include "components/optimization_guide/proto/features/common_quality_data.pb.h"
+ #include "components/viz/common/frame_sinks/copy_output_result.h"
++
  #include "content/public/browser/browser_thread.h"
  #include "content/public/browser/child_process_termination_info.h"
- #include "content/public/browser/devtools_agent_host.h"
  #include "content/public/browser/navigation_controller.h"
 +#include "content/public/browser/navigation_entry.h"
 +#include "content/public/browser/navigation_details.h"
  #include "content/public/browser/navigation_handle.h"
  #include "content/public/browser/render_frame_host.h"
- #include "content/public/browser/render_process_host.h"
-@@ -390,6 +394,30 @@ void HeadlessWebContentsImpl::RenderViewReady() {
-   devtools_target_ready_notification_sent_ = true;
+ #include "content/public/browser/render_view_host.h"
+@@ -455,6 +460,7 @@ HeadlessWebContentsImpl::HeadlessWebContentsImpl(
+   }
+ 
+   web_contents_->SetDelegate(web_contents_delegate_.get());
++  content::WebContentsObserver::Observe(web_contents_.get());
  }
  
+ HeadlessWebContentsImpl::~HeadlessWebContentsImpl() {
+@@ -464,6 +470,32 @@ HeadlessWebContentsImpl::~HeadlessWebContentsImpl() {
+       FROM_HERE, std::move(window_tree_host_));
+ }
+ 
++
 +void HeadlessWebContentsImpl::TitleWasSet(content::NavigationEntry* entry) {
 +  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 +
@@ -629,19 +646,36 @@ index 010ff2c94287e..fad8c3fdd2bfe 100644
 +  );
 +}
 +
- int HeadlessWebContentsImpl::GetMainFrameRenderProcessId() const {
-   if (!web_contents() || !web_contents()->GetPrimaryMainFrame())
-     return -1;
++
+ bool HeadlessWebContentsImpl::OpenURL(const GURL& url) {
+   if (!url.is_valid())
+     return false;
 diff --git a/headless/lib/browser/headless_web_contents_impl.h b/headless/lib/browser/headless_web_contents_impl.h
-index b80147fd06be8..09773596aa5ce 100644
+index 62e7eea29cfdd..b5dc04b653d6a 100644
 --- a/headless/lib/browser/headless_web_contents_impl.h
 +++ b/headless/lib/browser/headless_web_contents_impl.h
-@@ -91,6 +91,8 @@ class HEADLESS_EXPORT HeadlessWebContentsImpl
-   void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
-   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
-   void RenderViewReady() override;
+@@ -36,8 +36,10 @@ namespace headless {
+ class HeadlessBrowserImpl;
+ 
+ // Exported for tests.
+-class HEADLESS_EXPORT HeadlessWebContentsImpl : public HeadlessWebContents,
+-                                                public HeadlessWindowDelegate {
++class HEADLESS_EXPORT HeadlessWebContentsImpl
++    : public HeadlessWebContents,
++      public HeadlessWindowDelegate,
++      public content::WebContentsObserver {
+  public:
+   HeadlessWebContentsImpl(const HeadlessWebContentsImpl&) = delete;
+   HeadlessWebContentsImpl& operator=(const HeadlessWebContentsImpl&) = delete;
+@@ -55,6 +57,11 @@ class HEADLESS_EXPORT HeadlessWebContentsImpl : public HeadlessWebContents,
+       HeadlessWebContentsImpl* parent,
+       std::unique_ptr<content::WebContents> child_contents);
+ 
++  // content::WebContentsObserver implementation:
 +  void TitleWasSet(content::NavigationEntry* entry) override;
 +  void DidFinishNavigation(content::NavigationHandle* navigation_handle) override;
- 
++
++
    content::WebContents* web_contents() const;
    bool OpenURL(const GURL& url);
+ 

@@ -1,0 +1,30 @@
+From 8ad998fe826a0537a3c44b4560002865d74f035c Mon Sep 17 00:00:00 2001
+From: Joseph Magly <1159087+jmagly@users.noreply.github.com>
+Date: Tue, 7 Apr 2026 04:46:34 -0400
+Subject: [PATCH 22/25] fix(m135): remove stale :blink target dep from blink
+ platform BUILD.gn
+
+Patch 0012 replaced the :carbonyl dep with :blink in
+third_party/blink/renderer/platform/BUILD.gn, introducing a
+carbonyl::blink API. Patch 0013 reverted that API back to
+carbonyl::Bridge without removing the :blink dep from BUILD.gn.
+The :blink GN target was never defined, causing gn gen to fail with
+"unresolved dependency: needs //carbonyl/src/browser:blink".
+
+Remove the stale dep. Platform uses carbonyl::Bridge from :bridge.
+---
+ third_party/blink/renderer/platform/BUILD.gn | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/third_party/blink/renderer/platform/BUILD.gn b/third_party/blink/renderer/platform/BUILD.gn
+index 213456454c7d5..79c581e819e8f 100644
+--- a/third_party/blink/renderer/platform/BUILD.gn
++++ b/third_party/blink/renderer/platform/BUILD.gn
+@@ -1803,7 +1803,6 @@ component("platform") {
+     "//base:base_static",
+     "//base/allocator:buildflags",
+     "//build:chromecast_buildflags",
+-    "//carbonyl/src/browser:blink",
+     "//carbonyl/src/browser:bridge",
+     "//cc",
+     "//cc/ipc",

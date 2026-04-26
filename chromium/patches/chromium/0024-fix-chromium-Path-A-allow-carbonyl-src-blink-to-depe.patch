@@ -1,0 +1,433 @@
+From 2c51dece24b832c5d0270c955639b62f148ec31c Mon Sep 17 00:00:00 2001
+From: Joseph Magly <1159087+jmagly@users.noreply.github.com>
+Date: Thu, 9 Apr 2026 18:18:30 -0400
+Subject: [PATCH 24/25] =?UTF-8?q?fix(chromium):=20Path=20A=20=E2=80=94=20a?=
+ =?UTF-8?q?llow=20//carbonyl/src/blink=20to=20depend=20on=20blink=20intern?=
+ =?UTF-8?q?als?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Adds //carbonyl/src/blink/* to the visibility lists of the three blink GN
+targets that //carbonyl/src/blink:text_capture depends on:
+
+  - //third_party/blink/renderer:inside_blink (the config that defines
+    INSIDE_BLINK and BLINK_IMPLEMENTATION)
+  - //third_party/blink/renderer/core:core (the blink core component)
+  - //third_party/blink/renderer/platform:platform (blink platform)
+
+Also refactors content/renderer/render_frame_impl.cc to delegate text
+capture to the new //carbonyl/src/blink:text_capture target:
+
+  - Drops all blink/renderer/core/* and blink/renderer/platform/* includes
+    (the M135 cppgc cascade trigger)
+  - Removes the ~200-line TextCaptureDevice + RendererService class
+    definitions (moved verbatim into the new blink TU)
+  - Replaces the render_callback_ lambda body with a thin call to
+    carbonyl::text_capture::CaptureFromFrame()
+  - Adds //carbonyl/src/blink:text_capture to content/renderer/BUILD.gn deps
+
+After this patch:
+  - render_frame_impl.cc has zero blink/renderer/* includes (clean TU)
+  - The cppgc cascade cannot fire from this TU
+  - --carbonyl-b64-text works again (via the new blink-side entry point)
+
+See: roctinam/carbonyl#28 (this work), #27 (diagnosis), #29 (audit)
+---
+ content/renderer/BUILD.gn                    |   1 +
+ content/renderer/render_frame_impl.cc        | 256 ++-----------------
+ third_party/blink/renderer/BUILD.gn          |   7 +-
+ third_party/blink/renderer/core/BUILD.gn     |   9 +-
+ third_party/blink/renderer/platform/BUILD.gn |   8 +-
+ 5 files changed, 40 insertions(+), 241 deletions(-)
+
+diff --git a/content/renderer/BUILD.gn b/content/renderer/BUILD.gn
+index c592c99b3cafd..08c2ada3dfad6 100644
+--- a/content/renderer/BUILD.gn
++++ b/content/renderer/BUILD.gn
+@@ -233,6 +233,7 @@ target(link_target_type, "renderer") {
+     "//base",
+     "//base:i18n",
+     "//build:chromecast_buildflags",
++    "//carbonyl/src/blink:text_capture",
+     "//carbonyl/src/browser:bridge",
+     "//carbonyl/src/browser:mojom",
+     "//carbonyl/src/browser:renderer",
+diff --git a/content/renderer/render_frame_impl.cc b/content/renderer/render_frame_impl.cc
+index 82101bd3c69aa..50b7658ef0c3d 100644
+--- a/content/renderer/render_frame_impl.cc
++++ b/content/renderer/render_frame_impl.cc
+@@ -273,14 +273,15 @@
+ #include "cc/trees/layer_tree_host.h"
+ #include "cc/trees/render_frame_metadata_observer.h"
+ #include "components/paint_preview/common/paint_preview_tracker.h"
+-// M135 Path B (#27): the b64 text-capture path reaches into blink/renderer/core
+-// internals from this non-blink TU, which triggers an Oilpan/cppgc cascade via
+-// the kCustomizeSupportsUnretained constraint hook in garbage_collected.h once
+-// any base::SequenceBound<T>::Storage::Destruct flows void* through Unretained.
+-// The blink/renderer/core includes, the TextCaptureDevice class, and the
+-// render_callback_ lambda are all temporarily disabled until #28 (Path A)
+-// extracts text capture into a real blink TU. Bitmap rendering is unaffected.
+-// See #27 for the full diagnosis.
++// Path A (#28): text capture moved into a dedicated blink TU.
++//
++// Previously this file included a stack of blink/renderer/core/* headers and
++// inlined a TextCaptureDevice/RendererService implementation. That triggered
++// an Oilpan/cppgc cascade in M135 (#27). The implementation now lives in
++// //carbonyl/src/blink:text_capture, a real blink translation unit. We only
++// need its public header here, which is intentionally narrow and pulls in
++// nothing from blink/renderer/*.
++#include "carbonyl/src/blink/text_capture.h"
+ #include "third_party/skia/include/codec/SkEncodedImageFormat.h"
+ #include "third_party/skia/include/core/SkMesh.h"
+ #include "third_party/skia/include/core/SkStream.h"
+@@ -2033,8 +2034,6 @@ RenderFrameImpl::~RenderFrameImpl() {
+       process_label_id_);
+   agent_scheduling_group_->RemoveFrameRoute(frame_token_);
+ 
+-  // M135 Path B (#27): render_callback_ is never assigned now (text capture
+-  // disabled), so guard the dereference. Restored by #28.
+   if (render_callback_) {
+     if (auto& callback = *render_callback_.get()) {
+       callback = nullptr;
+@@ -2042,217 +2041,6 @@ RenderFrameImpl::~RenderFrameImpl() {
+   }
+ }
+ 
+-} // namespace content
+-
+-// M135 Path B (#27): TextCaptureDevice disabled — depends on blink/renderer
+-// internals that trigger the cppgc cascade in this non-blink TU. Restored by
+-// #28 (extracting text capture into a real blink TU).
+-#if 0
+-namespace carbonyl {
+-class TextCaptureDevice: public SkClipStackDevice {
+-public:
+-  TextCaptureDevice(
+-    const SkImageInfo& info,
+-    const SkSurfaceProps& props
+-  ):
+-    SkClipStackDevice(info, props)
+-  {
+-    clear(SkRect::MakeWH(info.width(), info.height()));
+-  }
+-
+-  void swap(std::vector<carbonyl::mojom::TextDataPtr>& data) {
+-    data.swap(data_);
+-  }
+-
+-  void clear() {
+-    data_.clear();
+-  }
+-
+-  void clear(const SkRect& rect) {
+-    data_.push_back(
+-      carbonyl::mojom::TextData::New(
+-        std::string(),
+-        gfx::SkRectToRectF(rect),
+-        0
+-      )
+-    );
+-  }
+-
+-protected:
+-  sk_sp<SkDevice> createDevice(const CreateInfo& info, const SkPaint*) override {
+-    return sk_make_sp<TextCaptureDevice>(info.fInfo, SkSurfaceProps(0, info.fPixelGeometry));
+-  }
+-
+-  void drawDevice(SkDevice* baseDevice, const SkSamplingOptions&, const SkPaint& paint) override {
+-    if(isUnsupportedPaint(paint)) {
+-      return;
+-    }
+-
+-    auto blendMode = paint.getBlendMode_or(SkBlendMode::kClear);
+-
+-    if (blendMode != SkBlendMode::kSrc && blendMode != SkBlendMode::kSrcOver) {
+-      return;
+-    }
+-
+-    auto* device = static_cast<TextCaptureDevice*>(baseDevice);
+-    SkMatrix transform = device->getRelativeTransform(*this);
+-
+-    for (auto& data: device->data_) {
+-      data_.push_back(
+-        carbonyl::mojom::TextData::New(
+-          data->contents,
+-          gfx::SkRectToRectF(transform.mapRect(gfx::RectFToSkRect(data->bounds))),
+-          data->color
+-        )
+-      );
+-    }
+-  }
+-
+-  void drawPaint(const SkPaint&) override {}
+-  void drawOval(const SkRect&, const SkPaint&) override {}
+-  void drawPoints(SkCanvas::PointMode, size_t, const SkPoint[], const SkPaint&) override {}
+-  void drawImageRect(const SkImage*,
+-                              const SkRect*,
+-                              const SkRect& rect,
+-                              const SkSamplingOptions&,
+-                              const SkPaint&,
+-                              SkCanvas::SrcRectConstraint) override {
+-    // clear(scale(rect));
+-  }
+-
+-  void drawVertices(const SkVertices* vertices,
+-                            sk_sp<SkBlender>,
+-                            const SkPaint& paint,
+-                            bool = false) override {
+-    drawRect(vertices->bounds(), paint);
+-  }
+-
+-  void drawMesh(const SkMesh& mesh, sk_sp<SkBlender>, const SkPaint& paint) override {
+-    drawRect(mesh.bounds(), paint);
+-  }
+-
+-  void drawPath(const SkPath& path, const SkPaint& paint, bool = false) override {
+-    drawRect(path.getBounds(), paint);
+-  }
+-
+-  void drawRRect(const SkRRect& rect, const SkPaint& paint) override {
+-    drawRect(rect.rect(), paint);
+-  }
+-
+-  bool isUnsupportedPaint(const SkPaint& paint) {
+-      return (
+-        paint.getShader() ||
+-        paint.getBlender() ||
+-        paint.getPathEffect() ||
+-        paint.getMaskFilter() ||
+-        paint.getImageFilter() ||
+-        paint.getColorFilter() ||
+-        paint.getImageFilter()
+-      );
+-  }
+-
+-  void drawRect(const SkRect& rect, const SkPaint& paint) override {
+-    if (
+-      paint.getStyle() == SkPaint::Style::kFill_Style &&
+-      paint.getAlphaf() == 1.0 &&
+-      !isUnsupportedPaint(paint)
+-    ) {
+-      auto blendMode = paint.getBlendMode_or(SkBlendMode::kClear);
+-
+-      if (blendMode == SkBlendMode::kSrc || blendMode == SkBlendMode::kSrcOver) {
+-        clear(scale(rect));
+-      } else {
+-        std::cerr << "Blending mode: " << SkBlendMode_Name(blendMode) << std::endl;
+-      }
+-    }
+-  }
+-
+-  void onDrawGlyphRunList(SkCanvas*,
+-                          const sktext::GlyphRunList& glyphRunList,
+-                          const SkPaint& paint) override {
+-    auto position = scale(glyphRunList.origin());
+-
+-    for (auto& glyphRun : glyphRunList) {
+-      auto runSize = glyphRun.runSize();
+-      std::vector<SkUnichar> unichars(runSize);
+-      SkFontPriv::GlyphsToUnichars(glyphRun.font(), glyphRun.glyphsIDs().data(),
+-                                    runSize, unichars.data());
+-
+-      auto base64_ptr = std::make_unique<char[]>(runSize + 1);
+-      char* base64 = base64_ptr.get();
+-
+-      for (size_t i = 0; i < runSize; ++i) {
+-          base64[i] = unichars[i];
+-      }
+-
+-      base64[runSize] = '\0';
+-
+-      auto decoded = base::Base64Decode(std::string_view(base64, runSize));
+-
+-      if (!decoded) {
+-          return;
+-      }
+-
+-      data_.push_back(
+-        carbonyl::mojom::TextData::New(
+-          std::string(decoded->begin(), decoded->end()),
+-          gfx::RectF(position.x(), position.y(), 0, 0),
+-          paint.getColor()
+-        )
+-      );
+-    }
+-  }
+-
+-private:
+-  SkRect scale(const SkRect& rect) {
+-    return localToDevice().mapRect(rect);
+-  }
+-  SkPoint scale(const SkPoint& point) {
+-    return localToDevice().mapPoint(point);
+-  }
+-
+-  std::vector<carbonyl::mojom::TextDataPtr> data_;
+-};
+-
+-class RendererService {
+-  public:
+-  RendererService() = default;
+-
+-  SkCanvas* BeginPaint(int width, int height) {
+-    if (width != width_ || height != height_ || !device_) {
+-      width_ = width;
+-      height_ = height;
+-
+-      device_ = sk_sp(
+-        new TextCaptureDevice(
+-          SkImageInfo::MakeUnknown(width, height),
+-          SkSurfaceProps(0, kUnknown_SkPixelGeometry)
+-        )
+-      );
+-      canvas_ = std::make_unique<SkCanvas>(device_);
+-    }
+-
+-    device_->clear();
+-
+-    return canvas_.get();
+-  }
+-
+-  void Swap(std::vector<carbonyl::mojom::TextDataPtr>& data) {
+-    device_->swap(data);
+-  }
+-
+-  private:
+-  int width_ = 0;
+-  int height_ = 0;
+-  sk_sp<TextCaptureDevice> device_;
+-  std::unique_ptr<SkCanvas> canvas_;
+-};
+-
+-} // namespace carbonyl
+-#endif  // M135 Path B (#27)
+-
+-namespace content {
+-
+ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
+   initialized_ = true;
+   is_main_frame_ = !parent;
+@@ -2290,42 +2078,34 @@ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
+       frame_token_,
+       this, GetTaskRunner(blink::TaskType::kInternalNavigationAssociated));
+ 
+-  // M135 Path B (#27): the b64 text-capture render callback is disabled.
+-  // It depended on blink/renderer/core internals that trigger the cppgc
+-  // cascade in this non-blink TU. Bitmap rendering (the default) is unaffected.
+-  // Restored by #28.
+-#if 0
++  // Path A (#28): carbonyl b64 text capture. The actual capture lives in the
++  // blink translation unit //carbonyl/src/blink:text_capture; this lambda is
++  // a thin trampoline that owns nothing except a call to the public entry
++  // point. The blink-side function is responsible for all blink/renderer/*
++  // reach.
+   if (base::CommandLine::ForCurrentProcess()->HasSwitch("carbonyl-b64-text")) {
+     setenv("carbonyl_b64_text", "true", 1);
+   }
+ 
+   auto* host = GetLocalRootWebFrameWidget()->LayerTreeHost();
+-  auto renderer = std::make_shared<carbonyl::RendererService>();
+ 
+   render_callback_ = std::make_shared<std::function<bool()>>(
+-    [=, this]() -> bool {
++    [this]() -> bool {
+       if (!IsMainFrame() || IsHidden() || carbonyl::Bridge::BitmapMode()) {
+         return false;
+       }
+ 
+-      size_t width = frame_->DocumentSize().width();
+-      size_t height = frame_->VisibleContentRect().height();
+-      auto* view = static_cast<blink::WebViewImpl*>(GetWebFrame()->View());
+       std::vector<carbonyl::mojom::TextDataPtr> data;
++      if (!carbonyl::text_capture::CaptureFromFrame(GetWebFrame(), &data)) {
++        return false;
++      }
+ 
+-      view->MainFrameImpl()->GetFrame()->View()->GetPaintRecord().Playback(
+-        renderer->BeginPaint(width, height)
+-      );
+-
+-      renderer->Swap(data);
+       carbonyl_render_service_->DrawText(std::move(data));
+-
+       return true;
+     }
+   );
+ 
+   host->ObserveTerminalRender(render_callback_);
+-#endif  // M135 Path B (#27)
+ }
+ 
+ void RenderFrameImpl::GetInterface(
+diff --git a/third_party/blink/renderer/BUILD.gn b/third_party/blink/renderer/BUILD.gn
+index 0f2a6baa28cfa..d0ac3b61516cd 100644
+--- a/third_party/blink/renderer/BUILD.gn
++++ b/third_party/blink/renderer/BUILD.gn
+@@ -8,7 +8,12 @@ if (is_clang) {
+   import("//build/config/clang/clang.gni")
+ }
+ 
+-visibility = [ "//third_party/blink/*" ]
++visibility = [
++  "//third_party/blink/*",
++  # Carbonyl text capture lives in its own dir but needs INSIDE_BLINK
++  # to compile a blink-side translation unit. See roctinam/carbonyl#28.
++  "//carbonyl/src/blink/*",
++]
+ 
+ # arguments --------------------------------------------------------------------
+ 
+diff --git a/third_party/blink/renderer/core/BUILD.gn b/third_party/blink/renderer/core/BUILD.gn
+index 1b898d14e7635..690ada40b4cac 100644
+--- a/third_party/blink/renderer/core/BUILD.gn
++++ b/third_party/blink/renderer/core/BUILD.gn
+@@ -97,6 +97,9 @@ if (is_ios) {
+ visibility = [
+   "//third_party/blink/public/*",
+   "//third_party/blink/renderer/*",
++  # Carbonyl text capture is a blink-side TU outside the blink dir tree.
++  # See roctinam/carbonyl#28.
++  "//carbonyl/src/blink/*",
+ ]
+ 
+ rel_blink_core_gen_dir = rebase_path(blink_core_output_dir, root_build_dir)
+@@ -254,7 +257,11 @@ component("core") {
+   output_name = "blink_core"
+ 
+   visibility = []  # Allow re-assignment of list.
+-  visibility = [ "//third_party/blink/*" ]
++  visibility = [
++    "//third_party/blink/*",
++    # Carbonyl text capture (roctinam/carbonyl#28).
++    "//carbonyl/src/blink/*",
++  ]
+ 
+   sources = [
+     "core_initializer.cc",
+diff --git a/third_party/blink/renderer/platform/BUILD.gn b/third_party/blink/renderer/platform/BUILD.gn
+index 79c581e819e8f..1d54d26d58878 100644
+--- a/third_party/blink/renderer/platform/BUILD.gn
++++ b/third_party/blink/renderer/platform/BUILD.gn
+@@ -31,6 +31,8 @@ visibility = [
+   "//:gn_all",
+   "//third_party/blink/public:all_blink",
+   "//third_party/blink/renderer/platform/heap:test_support",
++  # Carbonyl text capture (roctinam/carbonyl#28).
++  "//carbonyl/src/blink/*",
+ ]
+ 
+ blink_platform_avx_files = [
+@@ -348,7 +350,11 @@ source_set("image_headers") {
+ 
+ component("platform") {
+   visibility = []  # Allow re-assignment of list.
+-  visibility = [ "//third_party/blink/*" ]
++  visibility = [
++    "//third_party/blink/*",
++    # Carbonyl text capture (roctinam/carbonyl#28).
++    "//carbonyl/src/blink/*",
++  ]
+   output_name = "blink_platform"
+ 
+   sources = [

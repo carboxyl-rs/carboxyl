@@ -1,41 +1,494 @@
-From bdc80f35a7113b7523c4d992edc9170db082deb0 Mon Sep 17 00:00:00 2001
+From aec5ac9c70182f363890601ff2de7b42bc164918 Mon Sep 17 00:00:00 2001
 From: Fathy Boundjadj <hey@fathy.fr>
 Date: Sun, 12 Feb 2023 00:55:33 +0100
-Subject: [PATCH 10/14] Conditionally enable text rendering
+Subject: [PATCH 10/25] Conditionally enable text rendering
 
 ---
- content/renderer/render_frame_impl.cc         |  3 ++-
- .../core/css/resolver/style_resolver.cc       | 26 +++++++++++--------
- third_party/blink/renderer/platform/BUILD.gn  |  1 +
- .../blink/renderer/platform/fonts/font.cc     | 10 +++----
- 4 files changed, 23 insertions(+), 17 deletions(-)
+ cc/trees/layer_tree_host.cc                   |  21 ++
+ cc/trees/layer_tree_host.h                    |   8 +
+ content/browser/browser_interface_binders.cc  |   4 +
+ .../renderer_host/render_frame_host_impl.cc   |   6 +
+ .../renderer_host/render_frame_host_impl.h    |   5 +
+ content/renderer/render_frame_impl.cc         | 284 ++++++++++++++++++
+ .../blink/public/web/web_frame_widget.h       |   7 +
+ .../core/css/resolver/style_resolver.cc       |  26 +-
+ third_party/blink/renderer/platform/BUILD.gn  |   1 +
+ .../blink/renderer/platform/fonts/font.cc     |  10 +-
+ 10 files changed, 356 insertions(+), 16 deletions(-)
 
+diff --git a/cc/trees/layer_tree_host.cc b/cc/trees/layer_tree_host.cc
+index 5a2d613cec812..9bdc7c3aeac63 100644
+--- a/cc/trees/layer_tree_host.cc
++++ b/cc/trees/layer_tree_host.cc
+@@ -503,6 +503,24 @@ bool LayerTreeHost::IsUsingLayerLists() const {
+   return settings_.use_layer_lists;
+ }
+ 
++void LayerTreeHost::StartTerminalRender() {
++  DCHECK(IsMainThread());
++
++  auto it = terminal_render_callbacks_.begin();
++
++  while (it != terminal_render_callbacks_.end()) {
++    auto& callback = *it->get();
++
++    if (callback) {
++      callback();
++
++      it++;
++    } else {
++      it = terminal_render_callbacks_.erase(it);
++    }
++  }
++}
++
+ void LayerTreeHost::CommitComplete(int source_frame_number,
+                                    const CommitTimestamps& commit_timestamps) {
+   DCHECK(IsMainThread());
+@@ -1773,6 +1791,9 @@ bool LayerTreeHost::PaintContent(const LayerList& update_layer_list) {
+   for (const auto& layer : update_layer_list) {
+     did_paint_content |= layer->Update();
+   }
++
++  StartTerminalRender();
++
+   return did_paint_content;
+ }
+ 
+diff --git a/cc/trees/layer_tree_host.h b/cc/trees/layer_tree_host.h
+index 6055bc8f78889..4ab7fb088e264 100644
+--- a/cc/trees/layer_tree_host.h
++++ b/cc/trees/layer_tree_host.h
+@@ -191,6 +191,12 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
+   // Returns the process global unique identifier for this LayerTreeHost.
+   int GetId() const;
+ 
++  // Carbonyl
++  void StartTerminalRender();
++  void ObserveTerminalRender(std::shared_ptr<std::function<bool()>> callback) {
++    terminal_render_callbacks_.push_back(callback);
++  }
++
+   // The commit state for the frame being assembled by the compositor host.
+   const CommitState* pending_commit_state() const {
+     DCHECK(IsMainThread());
+@@ -1193,6 +1199,8 @@ class CC_EXPORT LayerTreeHost : public MutatorHostClient {
+   std::unique_ptr<PropertyTreeDelegate> owned_property_tree_delegate_;
+   raw_ptr<PropertyTreeDelegate> property_tree_delegate_;
+ 
++  std::vector<std::shared_ptr<std::function<bool()>>> terminal_render_callbacks_;
++
+   base::WeakPtrFactory<LayerTreeHost> weak_ptr_factory_{this};
+ };
+ 
+diff --git a/content/browser/browser_interface_binders.cc b/content/browser/browser_interface_binders.cc
+index f5f7a55ddaabf..d2102f1f5674f 100644
+--- a/content/browser/browser_interface_binders.cc
++++ b/content/browser/browser_interface_binders.cc
+@@ -943,6 +943,10 @@ void PopulateBinderMapWithContext(
+       &BindRenderFrameHostImpl<
+           &RenderFrameHostImpl::CreateWebTransportConnector>);
+ 
++  map->Add<carbonyl::mojom::CarbonylRenderService>(
++      base::BindRepeating(&RenderFrameHostImpl::GetCarbonylRenderService,
++                          base::Unretained(host)));
++
+   // BrowserMainLoop::GetInstance() may be null on unit tests.
+   if (BrowserMainLoop::GetInstance()) {
+     // BrowserMainLoop, which owns MediaStreamManager, is alive for the lifetime
+diff --git a/content/browser/renderer_host/render_frame_host_impl.cc b/content/browser/renderer_host/render_frame_host_impl.cc
+index c5ee522e5ffb3..b0f897e6d8171 100644
+--- a/content/browser/renderer_host/render_frame_host_impl.cc
++++ b/content/browser/renderer_host/render_frame_host_impl.cc
+@@ -14947,6 +14947,12 @@ void RenderFrameHostImpl::BindTrustTokenQueryAnswerer(
+       std::move(receiver), ComputeTopFrameOrigin(GetLastCommittedOrigin()));
+ }
+ 
++void RenderFrameHostImpl::GetCarbonylRenderService(
++    mojo::PendingReceiver<carbonyl::mojom::CarbonylRenderService> receiver) {
++  carbonyl_render_service_ = std::make_unique<carbonyl::CarbonylRenderServiceImpl>(
++    std::move(receiver));
++}
++
+ void RenderFrameHostImpl::GetAudioContextManager(
+     mojo::PendingReceiver<blink::mojom::AudioContextManager> receiver) {
+   AudioContextManagerImpl::Create(this, std::move(receiver));
+diff --git a/content/browser/renderer_host/render_frame_host_impl.h b/content/browser/renderer_host/render_frame_host_impl.h
+index 0ae6d6c5ad5c5..026d6ebbb7826 100644
+--- a/content/browser/renderer_host/render_frame_host_impl.h
++++ b/content/browser/renderer_host/render_frame_host_impl.h
+@@ -216,6 +216,8 @@
+ #include "media/mojo/mojom/remoting.mojom-forward.h"
+ #endif
+ 
++#include "carbonyl/src/browser/render_service_impl.h"
++
+ namespace blink {
+ class AssociatedInterfaceRegistry;
+ class DocumentPolicy;
+@@ -2081,6 +2083,9 @@ class CONTENT_EXPORT RenderFrameHostImpl
+   // Set the `frame_` for sending messages to the renderer process.
+   void SetMojomFrameRemote(mojo::PendingAssociatedRemote<mojom::Frame>);
+ 
++  void GetCarbonylRenderService(
++    mojo::PendingReceiver<carbonyl::mojom::CarbonylRenderService> receiver);
++
+   void GetAudioContextManager(
+       mojo::PendingReceiver<blink::mojom::AudioContextManager> receiver);
+ 
 diff --git a/content/renderer/render_frame_impl.cc b/content/renderer/render_frame_impl.cc
-index 97b61ffb954be..891efd6a9d796 100644
+index e74978a3550be..4efd81b5b90d5 100644
 --- a/content/renderer/render_frame_impl.cc
 +++ b/content/renderer/render_frame_impl.cc
-@@ -259,6 +259,7 @@
- // Carbonyl
- #include <stdlib.h>
- #include <iostream>
+@@ -245,6 +245,7 @@
+ #include "third_party/blink/public/web/web_window_features.h"
+ #include "third_party/perfetto/include/perfetto/tracing/track.h"
+ #include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
++#include "third_party/skia/include/core/SkPictureRecorder.h"
+ #include "ui/accessibility/ax_tree_update.h"
+ #include "ui/events/base_event_utils.h"
+ #include "url/origin.h"
+@@ -261,6 +262,39 @@
+ #include "mojo/public/cpp/bindings/self_owned_associated_receiver.h"
+ #endif
+ 
++// Carbonyl
++#include <stdlib.h>
++#include <iostream>
 +#include "carbonyl/src/browser/bridge.h"
- #include "cc/paint/paint_recorder.h"
- #include "cc/paint/skia_paint_canvas.h"
- #include "cc/raster/playback_image_provider.h"
-@@ -2221,7 +2222,7 @@ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
++#include "cc/paint/paint_recorder.h"
++#include "cc/paint/skia_paint_canvas.h"
++#include "cc/raster/playback_image_provider.h"
++#include "cc/tiles/software_image_decode_cache.h"
++#include "cc/trees/layer_tree_host.h"
++#include "cc/trees/render_frame_metadata_observer.h"
++#include "components/paint_preview/common/paint_preview_tracker.h"
++#include "third_party/blink/renderer/core/exported/web_view_impl.h"
++#include "third_party/blink/renderer/core/dom/frame_request_callback_collection.h"
++#include "third_party/blink/renderer/core/frame/local_frame_view.h"
++#include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
++#include "third_party/blink/renderer/core/paint/paint_flags.h"
++#include "third_party/blink/renderer/core/layout/layout_view.h"
++#include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
++#include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
++#include "third_party/skia/include/core/SkEncodedImageFormat.h"
++#include "third_party/skia/include/core/SkMesh.h"
++#include "third_party/skia/include/core/SkStream.h"
++#include "third_party/skia/include/core/SkSurface.h"
++#include "third_party/skia/include/core/SkVertices.h"
++#include "third_party/skia/include/docs/SkPDFDocument.h"
++#include "third_party/skia/include/svg/SkSVGCanvas.h"
++#include "third_party/skia/include/utils/SkBase64.h"
++#include "third_party/skia/src/text/GlyphRun.h"
++#include "third_party/skia/src/core/SkClipStackDevice.h"
++#include "third_party/skia/src/core/SkDevice.h"
++#include "third_party/skia/src/core/SkFontPriv.h"
++#include "third_party/skia/src/utils/SkUTF.h"
++
+ using base::Time;
+ using blink::ContextMenuData;
+ using blink::WebContentDecryptionModule;
+@@ -2005,6 +2039,223 @@ RenderFrameImpl::~RenderFrameImpl() {
+   }
+ }
  
-   render_callback_ = std::make_shared<std::function<bool()>>(
-     [=]() -> bool {
--      if (!IsMainFrame() || IsHidden()) {
++} // namespace content
++
++namespace carbonyl {
++class TextCaptureDevice: public SkClipStackDevice {
++public:
++  TextCaptureDevice(
++    const SkImageInfo& info,
++    const SkSurfaceProps& props
++  ):
++    SkClipStackDevice(info, props)
++  {
++    clear(SkRect::MakeWH(info.width(), info.height()));
++  }
++
++  void swap(std::vector<carbonyl::mojom::TextDataPtr>& data) {
++    data.swap(data_);
++  }
++
++  void clear() {
++    data_.clear();
++  }
++
++  void clear(const SkRect& rect) {
++    data_.push_back(
++      carbonyl::mojom::TextData::New(
++        std::string(),
++        gfx::SkRectToRectF(rect),
++        0
++      )
++    );
++  }
++
++protected:
++  SkBaseDevice* onCreateDevice(const CreateInfo& info, const SkPaint*) override {
++    return new TextCaptureDevice(info.fInfo, SkSurfaceProps(0, info.fPixelGeometry));
++  }
++
++  void drawDevice(SkBaseDevice* baseDevice, const SkSamplingOptions&, const SkPaint& paint) override {
++    if(isUnsupportedPaint(paint)) {
++      return;
++    }
++
++    auto blendMode = paint.getBlendMode_or(SkBlendMode::kClear);
++
++    if (blendMode != SkBlendMode::kSrc && blendMode != SkBlendMode::kSrcOver) {
++      return;
++    }
++
++    auto* device = static_cast<TextCaptureDevice*>(baseDevice);
++    SkMatrix transform = device->getRelativeTransform(*this);
++
++    for (auto& data: device->data_) {
++      data_.push_back(
++        carbonyl::mojom::TextData::New(
++          data->contents,
++          gfx::SkRectToRectF(transform.mapRect(gfx::RectFToSkRect(data->bounds))),
++          data->color
++        )
++      );
++    }
++  }
++
++  void drawPaint(const SkPaint&) override {}
++  void drawOval(const SkRect&, const SkPaint&) override {}
++  void drawPoints(SkCanvas::PointMode, size_t, const SkPoint[], const SkPaint&) override {}
++  void drawImageRect(const SkImage*,
++                              const SkRect*,
++                              const SkRect& rect,
++                              const SkSamplingOptions&,
++                              const SkPaint&,
++                              SkCanvas::SrcRectConstraint) override {
++    // clear(scale(rect));
++  }
++
++  void drawVertices(const SkVertices* vertices,
++                            sk_sp<SkBlender>,
++                            const SkPaint& paint,
++                            bool = false) override {
++    drawRect(vertices->bounds(), paint);
++  }
++
++  void drawMesh(const SkMesh& mesh, sk_sp<SkBlender>, const SkPaint& paint) override {
++    drawRect(mesh.bounds(), paint);
++  }
++
++  void drawPath(const SkPath& path, const SkPaint& paint, bool = false) override {
++    drawRect(path.getBounds(), paint);
++  }
++
++  void drawRRect(const SkRRect& rect, const SkPaint& paint) override {
++    drawRect(rect.rect(), paint);
++  }
++
++  bool isUnsupportedPaint(const SkPaint& paint) {
++      return (
++        paint.getShader() ||
++        paint.getBlender() ||
++        paint.getPathEffect() ||
++        paint.getMaskFilter() ||
++        paint.getImageFilter() ||
++        paint.getColorFilter() ||
++        paint.getImageFilter()
++      );
++  }
++
++  void drawRect(const SkRect& rect, const SkPaint& paint) override {
++    if (
++      paint.getStyle() == SkPaint::Style::kFill_Style &&
++      paint.getAlphaf() == 1.0 &&
++      !isUnsupportedPaint(paint)
++    ) {
++      auto blendMode = paint.getBlendMode_or(SkBlendMode::kClear);
++
++      if (blendMode == SkBlendMode::kSrc || blendMode == SkBlendMode::kSrcOver) {
++        clear(scale(rect));
++      } else {
++        std::cerr << "Blending mode: " << SkBlendMode_Name(blendMode) << std::endl;
++      }
++    }
++  }
++
++  void onDrawGlyphRunList(SkCanvas*,
++                          const sktext::GlyphRunList& glyphRunList,
++                          const SkPaint&,
++                          const SkPaint& paint) override {
++    auto position = scale(glyphRunList.origin());
++
++    for (auto& glyphRun : glyphRunList) {
++      auto runSize = glyphRun.runSize();
++      SkAutoSTArray<64, SkUnichar> unichars(runSize);
++      SkFontPriv::GlyphsToUnichars(glyphRun.font(), glyphRun.glyphsIDs().data(),
++                                    runSize, unichars.get());
++
++      auto base64_ptr = std::make_unique<char[]>(runSize + 1);
++      char* base64 = base64_ptr.get();
++
++      for (size_t i = 0; i < runSize; ++i) {
++          base64[i] = unichars[i];
++      }
++
++      base64[runSize] = '\0';
++
++      size_t size = 0;
++      auto error = SkBase64::Decode(base64, runSize, nullptr, &size);
++
++      if (error != SkBase64::kNoError) {
++          return;
++      }
++
++      auto utf8_ptr = std::make_unique<char[]>(size);
++      char* utf8 = utf8_ptr.get();
++
++      error = SkBase64::Decode(base64, runSize, utf8, &size);
++
++      if (error != SkBase64::kNoError) {
++          return;
++      }
++
++      data_.push_back(
++        carbonyl::mojom::TextData::New(
++          std::string(utf8, size),
++          gfx::RectF(position.x(), position.y(), 0, 0),
++          paint.getColor()
++        )
++      );
++    }
++  }
++
++private:
++  SkRect scale(const SkRect& rect) {
++    return localToDevice().mapRect(rect);
++  }
++  SkPoint scale(const SkPoint& point) {
++    return localToDevice().mapPoint(point);
++  }
++
++  std::vector<carbonyl::mojom::TextDataPtr> data_;
++};
++
++class RendererService {
++  public:
++  RendererService() = default;
++
++  SkCanvas* BeginPaint(int width, int height) {
++    if (width != width_ || height != height_ || !device_) {
++      width_ = width;
++      height_ = height;
++
++      device_ = sk_sp(
++        new TextCaptureDevice(
++          SkImageInfo::MakeUnknown(width, height),
++          SkSurfaceProps(0, kUnknown_SkPixelGeometry)
++        )
++      );
++      canvas_ = std::make_unique<SkCanvas>(device_);
++    }
++
++    device_->clear();
++
++    return canvas_.get();
++  }
++
++  void Swap(std::vector<carbonyl::mojom::TextDataPtr>& data) {
++    device_->swap(data);
++  }
++
++  private:
++  int width_ = 0;
++  int height_ = 0;
++  sk_sp<TextCaptureDevice> device_;
++  std::unique_ptr<SkCanvas> canvas_;
++};
++
++} // namespace carbonyl
++
++namespace content {
++
+ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
+   initialized_ = true;
+   is_main_frame_ = !parent;
+@@ -2030,6 +2281,8 @@ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
+                                   GetBrowserInterfaceBroker());
+   }
+ 
++  browser_interface_broker_proxy_.GetInterface(std::move(carbonyl_render_service_receiver_));
++
+   // Bind this class to mojom::Frame and to the message router for legacy IPC.
+   // These must be called after |frame_| is set since binding requires a
+   // per-frame task runner.
+@@ -2039,6 +2292,37 @@ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
+   agent_scheduling_group_->AddFrameRoute(
+       frame_token_,
+       this, GetTaskRunner(blink::TaskType::kInternalNavigationAssociated));
++
++  if (base::CommandLine::ForCurrentProcess()->HasSwitch("carbonyl-b64-text")) {
++    setenv("carbonyl_b64_text", "true", 1);
++  }
++
++  auto* host = GetLocalRootWebFrameWidget()->LayerTreeHost();
++  auto renderer = std::make_shared<carbonyl::RendererService>();
++
++  render_callback_ = std::make_shared<std::function<bool()>>(
++    [=]() -> bool {
 +      if (!IsMainFrame() || IsHidden() || carbonyl::Bridge::BitmapMode()) {
-         return false;
-       }
++        return false;
++      }
++
++      size_t width = frame_->DocumentSize().width();
++      size_t height = frame_->VisibleContentRect().height();
++      auto* view = static_cast<blink::WebViewImpl*>(GetWebFrame()->View());
++      std::vector<carbonyl::mojom::TextDataPtr> data;
++
++      view->MainFrameImpl()->GetFrame()->View()->GetPaintRecord().Playback(
++        renderer->BeginPaint(width, height)
++      );
++
++      renderer->Swap(data);
++      carbonyl_render_service_->DrawText(std::move(data));
++
++      return true;
++    }
++  );
++
++  host->ObserveTerminalRender(render_callback_);
+ }
  
+ void RenderFrameImpl::GetInterface(
+diff --git a/third_party/blink/public/web/web_frame_widget.h b/third_party/blink/public/web/web_frame_widget.h
+index 11e9b422ee4ed..d55d67e56752c 100644
+--- a/third_party/blink/public/web/web_frame_widget.h
++++ b/third_party/blink/public/web/web_frame_widget.h
+@@ -58,6 +58,10 @@ struct ApplyViewportChangesArgs;
+ class LayerTreeHost;
+ }  // namespace cc
+ 
++namespace content {
++class RenderFrameImpl;
++}  // namespace content
++
+ namespace gfx {
+ class PointF;
+ class RectF;
+@@ -271,6 +275,9 @@ class WebFrameWidget : public WebWidget {
+   // GPU benchmarking extension needs access to the LayerTreeHost
+   friend class GpuBenchmarkingContext;
+ 
++  // Allow RenderFrameImpl to access the LayerTreeHost for html2svg
++  friend class content::RenderFrameImpl;
++
+   // This private constructor and the class/friend declaration ensures that
+   // WebFrameWidgetImpl is the only concrete subclass that implements
+   // WebFrameWidget, so that it is safe to downcast to WebFrameWidgetImpl.
 diff --git a/third_party/blink/renderer/core/css/resolver/style_resolver.cc b/third_party/blink/renderer/core/css/resolver/style_resolver.cc
-index 79cb8c85b697f..7129982acf4a6 100644
+index 420273dfb1a3f..f1a7b43abee9c 100644
 --- a/third_party/blink/renderer/core/css/resolver/style_resolver.cc
 +++ b/third_party/blink/renderer/core/css/resolver/style_resolver.cc
-@@ -116,6 +116,8 @@
+@@ -141,6 +141,8 @@
  #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
  #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
  
@@ -44,8 +497,8 @@ index 79cb8c85b697f..7129982acf4a6 100644
  namespace blink {
  
  namespace {
-@@ -1041,18 +1043,20 @@ scoped_refptr<ComputedStyle> StyleResolver::ResolveStyle(
-     UseCounter::Count(GetDocument(), WebFeature::kHasGlyphRelativeUnits);
+@@ -1482,18 +1484,20 @@ const ComputedStyle* StyleResolver::ResolveStyle(
+     GetDocument().GetStyleEngine().SetUsesLineHeightUnits(true);
    }
  
 -  auto font = state.StyleBuilder().GetFontDescription();
@@ -77,23 +530,23 @@ index 79cb8c85b697f..7129982acf4a6 100644
    state.LoadPendingResources();
  
 diff --git a/third_party/blink/renderer/platform/BUILD.gn b/third_party/blink/renderer/platform/BUILD.gn
-index e7b1c1a52e4c9..63fc13e44b5ae 100644
+index eb2472737bd6e..f5292ee5fff98 100644
 --- a/third_party/blink/renderer/platform/BUILD.gn
 +++ b/third_party/blink/renderer/platform/BUILD.gn
-@@ -1678,6 +1678,7 @@ component("platform") {
+@@ -1803,6 +1803,7 @@ component("platform") {
+     "//base:base_static",
      "//base/allocator:buildflags",
      "//build:chromecast_buildflags",
-     "//build:chromeos_buildflags",
 +    "//carbonyl/src/browser:carbonyl",
+     "//cc",
      "//cc/ipc",
      "//cc/mojo_embedder",
-     "//components/paint_preview/common",
 diff --git a/third_party/blink/renderer/platform/fonts/font.cc b/third_party/blink/renderer/platform/fonts/font.cc
-index dfdc79eacce3b..4625300729523 100644
+index 25941467d1568..bf10907b23071 100644
 --- a/third_party/blink/renderer/platform/fonts/font.cc
 +++ b/third_party/blink/renderer/platform/fonts/font.cc
-@@ -49,6 +49,8 @@
- #include "third_party/skia/include/core/SkTextBlob.h"
+@@ -43,6 +43,8 @@
+ #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
  #include "ui/gfx/geometry/rect_f.h"
  
 +#include "carbonyl/src/browser/bridge.h"
@@ -101,7 +554,7 @@ index dfdc79eacce3b..4625300729523 100644
  namespace blink {
  
  namespace {
-@@ -151,14 +153,12 @@ bool Font::operator==(const Font& other) const {
+@@ -91,14 +93,12 @@ bool Font::operator==(const Font& other) const {
  
  namespace {
  
@@ -111,13 +564,13 @@ index dfdc79eacce3b..4625300729523 100644
                 const cc::PaintFlags& flags,
                 const ShapeResultBloberizer::BlobBuffer& blobs,
                 const gfx::PointF& point,
-                cc::NodeId node_id = cc::kInvalidNodeId) {  
+                cc::NodeId node_id = cc::kInvalidNodeId) {
 -  if (carbonyl_b64_text) {
 +  if (!carbonyl::Bridge::BitmapMode()) {
      return;
    }
  
-@@ -237,7 +237,7 @@ void Font::DrawText(cc::PaintCanvas* canvas,
+@@ -174,7 +174,7 @@ void Font::DrawText(cc::PaintCanvas* canvas,
    if (ShouldSkipDrawing())
      return;
  
@@ -126,7 +579,7 @@ index dfdc79eacce3b..4625300729523 100644
      auto string = StringView(
        run_info.run.ToStringView(),
        run_info.from,
-@@ -285,7 +285,7 @@ void Font::DrawText(cc::PaintCanvas* canvas,
+@@ -222,7 +222,7 @@ void Font::DrawText(cc::PaintCanvas* canvas,
    if (ShouldSkipDrawing())
      return;
  
