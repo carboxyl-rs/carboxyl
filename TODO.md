@@ -28,3 +28,28 @@
   * Cleanup, restore, flush logs
 
 * Investigate Servo instability further
+
+* Docker image
+
+  * Create reproducible build environment
+  * Optimize image size (multi-stage build)
+  * Ensure proper terminal support inside container
+
+---
+
+# Docs / README Improvements
+
+* Document terminal graphics support
+
+  * Supported protocols (Sixel / Kitty; when ready)
+  * Fallback behavior
+
+* Document Servo instability
+
+  * Known crash scenarios
+  * Current limitations
+  * Link to upstream issue in Servo once created
+    
+* Document Docker usage
+
+---
