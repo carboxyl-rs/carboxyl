@@ -4,7 +4,7 @@
       <td>
         <pre>
       O
-     ||
+    //
 R — C
       \
        OH</pre>
