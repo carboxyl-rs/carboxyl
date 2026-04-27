@@ -1,70 +1,55 @@
-use rustix::termios::{tcgetwinsize, Winsize};
+use glam::{UVec2, Vec2};
 use rustix::stdio::stdout;
+use rustix::termios::{Winsize, tcgetwinsize};
 
 use crate::cli::Cli;
-use crate::gfx::Size;
 
-/// The current state of the terminal window, derived from `TIOCGWINSZ` and
-/// the CLI zoom setting. Cheap to clone and snapshot.
+/// Snapshot of the terminal window dimensions, derived from `TIOCGWINSZ`
+/// and the CLI resolution setting. Cheap to clone — passed around by value.
 #[derive(Clone, Debug)]
 pub struct Window {
-    /// Device pixel ratio: how many physical pixels per logical CSS pixel.
-    pub dpi: f32,
-    /// Size of one terminal cell in physical pixels (width × height).
-    pub cell_pixels: Size<f32>,
-    /// Terminal dimensions in cells (excludes the nav bar row).
-    pub cells: Size<u32>,
-    /// Browser viewport in physical pixels — what Servo renders into.
-    pub browser: Size<u32>,
+    /// Terminal size in cells (nav bar row excluded).
+    pub cells: UVec2,
+    /// Pixels per terminal cell in the Servo viewport.
+    pub cell_pixels: Vec2,
+    /// Servo browser viewport in physical pixels.
+    pub browser: UVec2,
 }
 
 impl Window {
     pub fn read(cli: &Cli) -> Self {
         let mut w = Self {
-            dpi: 1.0,
-            cell_pixels: Size::new(8.0, 16.0),
-            cells: Size::new(80, 23),
-            browser: Size::new(0, 0),
+            cells: UVec2::new(80, 23),
+            cell_pixels: Vec2::new(2.0, 4.0),
+            browser: UVec2::ZERO,
         };
         w.update(cli);
         w
     }
 
     pub fn update(&mut self, cli: &Cli) {
-        let Winsize { ws_col, ws_row, ws_xpixel, ws_ypixel } =
-            tcgetwinsize(stdout()).unwrap_or(Winsize {
-                ws_col: 80,
-                ws_row: 24,
-                ws_xpixel: 0,
-                ws_ypixel: 0,
-            });
+        let Winsize { ws_col, ws_row, .. } = tcgetwinsize(stdout()).unwrap_or(Winsize {
+            ws_col: 80,
+            ws_row: 24,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        });
 
-        let term_cols = ws_col.max(1) as u32;
-        // Reserve one row for the navigation bar.
-        let term_rows = ws_row.max(2) as u32 - 1;
+        let cols = ws_col.max(1) as u32;
+        let rows = ws_row.max(2) as u32 - 1;
 
-        // If the terminal reports pixel dimensions, derive the cell size.
-        // Otherwise fall back to the classic 8×16 monospace assumption.
-        // Each terminal cell maps to a 2×4 sub-pixel region in the quadrant
-        // block encoding. The zoom level scales how many browser pixels each
-        // cell represents, giving Servo more detail to render into.
-        let zoom = cli.zoom as f32 / 100.0;
-        let scale_x = 2.0 * zoom;
-        let scale_y = 4.0 * zoom;
+        let zoom = cli.resolution as f32 / 100.0;
+        let scale = Vec2::new(2.0 * zoom, 4.0 * zoom);
 
-        self.dpi = 1.0; // kept for mouse coordinate scaling, not used for viewport sizing
-        self.cell_pixels = Size::new(scale_x, scale_y);
-        self.cells = Size::new(term_cols, term_rows);
-        self.browser = Size::new(
-            (term_cols as f32 * scale_x).ceil() as u32,
-            (term_rows as f32 * scale_y).ceil() as u32,
+        self.cells = UVec2::new(cols, rows);
+        self.cell_pixels = scale;
+        self.browser = UVec2::new(
+            (cols as f32 * scale.x).ceil() as u32,
+            (rows as f32 * scale.y).ceil() as u32,
         );
     }
 
-    /// Returns `true` if the layout-relevant dimensions have changed.
     pub fn differs_from(&self, other: &Window) -> bool {
-        self.cells != other.cells
-            || self.browser != other.browser
-            || (self.dpi - other.dpi).abs() > f32::EPSILON
+        self.cells != other.cells || self.browser != other.browser
     }
 }

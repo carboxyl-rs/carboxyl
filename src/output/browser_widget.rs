@@ -1,3 +1,4 @@
+use glam::UVec2;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -5,30 +6,16 @@ use ratatui::{
     widgets::Widget,
 };
 
-use crate::gfx::{Color as GfxColor, Size};
-
-/// The quadrant Unicode block used to encode 2×2 pixel regions per cell.
-/// Each character encodes which of the four quadrants are "foreground":
-///
-///   TL TR
-///   BL BR
-///
-/// We exploit this to pack two independently-coloured rows of pixels into a
-/// single terminal cell by averaging adjacent pixel pairs.
-const QUADRANT: [char; 16] = [
-    ' ', '▗', '▖', '▄', '▝', '▐', '▞', '▟', '▘', '▚', '▌', '▙', '▀', '▜', '▛', '█',
-];
-
-/// A snapshot of the pixel buffer Servo has rendered. Cheap to clone because
-/// the pixel data is reference-counted.
+/// A single rendered frame from Servo's software rendering context.
+/// Pixel data is RGBA8888, dimensions match `Window::browser`.
 #[derive(Clone)]
 pub struct BrowserFrame {
     pub pixels: Vec<u8>,
-    pub size: Size<u32>,
+    pub size: UVec2,
 }
 
 /// Ratatui widget that maps a `BrowserFrame` into terminal cells using
-/// quadrant block characters and true-color RGB styling.
+/// quadrant block characters for maximum sub-cell resolution.
 pub struct BrowserWidget<'a> {
     frame: &'a BrowserFrame,
     true_color: bool,
@@ -40,78 +27,43 @@ impl<'a> BrowserWidget<'a> {
     }
 }
 
+/// Quadrant block characters encoding which of the four sub-cell corners
+/// are "foreground". Bit layout: bit3=TL, bit2=TR, bit1=BL, bit0=BR.
+const QUADRANT: [char; 16] = [
+    ' ', '▗', '▖', '▄', '▝', '▐', '▞', '▟', '▘', '▚', '▌', '▙', '▀', '▜', '▛', '█',
+];
+
 impl Widget for BrowserWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let frame_w = self.frame.size.width as usize;
-        let frame_h = self.frame.size.height as usize;
+        let fw = self.frame.size.x as usize;
+        let fh = self.frame.size.y as usize;
 
-        if frame_w == 0 || frame_h == 0 || area.width == 0 || area.height == 0 {
+        if fw == 0 || fh == 0 || area.width == 0 || area.height == 0 {
             return;
         }
 
-        // Each terminal cell covers a 2-pixel-wide × 4-pixel-tall region in
-        // the quadrant encoding (top-half / bottom-half × left / right).
-        // We map `area` cells to frame pixels via nearest-neighbour sampling.
-        let target_w = area.width as usize * 2;
-        let target_h = area.height as usize * 4;
+        // Virtual pixel grid: each terminal cell = 2 wide × 4 tall sub-pixels.
+        let tw = area.width as usize * 2;
+        let th = area.height as usize * 4;
 
-        for cell_y in 0..area.height as usize {
-            for cell_x in 0..area.width as usize {
-                // Sample the four sub-pixel positions for this cell.
-                let tl = sample(
-                    &self.frame.pixels,
-                    frame_w,
-                    frame_h,
-                    target_w,
-                    target_h,
-                    cell_x * 2,
-                    cell_y * 4,
-                );
-                let tr = sample(
-                    &self.frame.pixels,
-                    frame_w,
-                    frame_h,
-                    target_w,
-                    target_h,
-                    cell_x * 2 + 1,
-                    cell_y * 4,
-                );
-                let bl = sample(
-                    &self.frame.pixels,
-                    frame_w,
-                    frame_h,
-                    target_w,
-                    target_h,
-                    cell_x * 2,
-                    cell_y * 4 + 2,
-                );
-                let br = sample(
-                    &self.frame.pixels,
-                    frame_w,
-                    frame_h,
-                    target_w,
-                    target_h,
-                    cell_x * 2 + 1,
-                    cell_y * 4 + 2,
-                );
+        for cy in 0..area.height as usize {
+            for cx in 0..area.width as usize {
+                let tl = sample(&self.frame.pixels, fw, fh, tw, th, cx * 2, cy * 4);
+                let tr = sample(&self.frame.pixels, fw, fh, tw, th, cx * 2 + 1, cy * 4);
+                let bl = sample(&self.frame.pixels, fw, fh, tw, th, cx * 2, cy * 4 + 2);
+                let br = sample(&self.frame.pixels, fw, fh, tw, th, cx * 2 + 1, cy * 4 + 2);
 
-                // Derive fg/bg colors consistent with the quadrant assignment:
-                // fg = average of the two brighter corners,
-                // bg = average of the two darker corners.
-                let (fg_color, bg_color) = fg_bg_colors(tl, tr, bl, br);
-                let char = quadrant_char(tl, tr, bl, br);
+                let (fg_rgb, bg_rgb) = fg_bg(tl, tr, bl, br);
+                let ch = quadrant_char(tl, tr, bl, br);
 
-                let x = area.x + cell_x as u16;
-                let y = area.y + cell_y as u16;
+                let x = area.x + cx as u16;
+                let y = area.y + cy as u16;
 
                 if x < buf.area.right() && y < buf.area.bottom() {
-                    let cell = buf.cell_mut((x, y)).unwrap();
-
-                    cell.set_char(char);
-                    cell.set_style(
+                    buf.cell_mut((x, y)).unwrap().set_char(ch).set_style(
                         Style::new()
-                            .fg(to_ratatui_color(fg_color, self.true_color))
-                            .bg(to_ratatui_color(bg_color, self.true_color)),
+                            .fg(to_color(fg_rgb, self.true_color))
+                            .bg(to_color(bg_rgb, self.true_color)),
                     );
                 }
             }
@@ -119,107 +71,71 @@ impl Widget for BrowserWidget<'_> {
     }
 }
 
-/// Sample a single BGRA pixel from the frame buffer, scaling from target
-/// coordinates (where target is `target_w × target_h` virtual pixels
-/// covering the same area as the frame) back to frame coordinates.
-fn sample(
-    pixels: &[u8],
-    frame_w: usize,
-    frame_h: usize,
-    target_w: usize,
-    target_h: usize,
-    tx: usize,
-    ty: usize,
-) -> GfxColor {
-    let sx = ((tx as f32 + 0.5) * frame_w as f32 / target_w as f32) as usize;
-    let sy = ((ty as f32 + 0.5) * frame_h as f32 / target_h as f32) as usize;
-    let x = sx.min(frame_w - 1);
-    let y = sy.min(frame_h - 1);
-    let idx = (y * frame_w + x) * 4;
+// ---------------------------------------------------------------------------
+// Pixel helpers
+// ---------------------------------------------------------------------------
 
-    // SoftwareRenderingContext::read_to_image returns image::RgbaImage,
-    // whose raw bytes are RGBA8888.
-    GfxColor::new(
-        pixels[idx],     // R
-        pixels[idx + 1], // G
-        pixels[idx + 2], // B
+type Rgb = (u8, u8, u8);
+
+/// Sample one pixel from the frame buffer using nearest-neighbour scaling.
+/// Frame is RGBA8888; we discard alpha.
+fn sample(pixels: &[u8], fw: usize, fh: usize, tw: usize, th: usize, tx: usize, ty: usize) -> Rgb {
+    let sx = ((tx as f32 + 0.5) * fw as f32 / tw as f32) as usize;
+    let sy = ((ty as f32 + 0.5) * fh as f32 / th as f32) as usize;
+    let x = sx.min(fw - 1);
+    let y = sy.min(fh - 1);
+    let i = (y * fw + x) * 4;
+    (pixels[i], pixels[i + 1], pixels[i + 2]) // RGBA → RGB
+}
+
+fn avg(a: Rgb, b: Rgb) -> Rgb {
+    (
+        ((a.0 as u16 + b.0 as u16) / 2) as u8,
+        ((a.1 as u16 + b.1 as u16) / 2) as u8,
+        ((a.2 as u16 + b.2 as u16) / 2) as u8,
     )
 }
 
-/// Average two colours component-wise.
-fn avg(a: GfxColor, b: GfxColor) -> GfxColor {
-    GfxColor::new(
-        ((a.r as u16 + b.r as u16) / 2) as u8,
-        ((a.g as u16 + b.g as u16) / 2) as u8,
-        ((a.b as u16 + b.b as u16) / 2) as u8,
-    )
+fn luma((r, g, b): Rgb) -> u16 {
+    (r as u16 * 77 + g as u16 * 150 + b as u16 * 29) >> 8
 }
 
-/// Derive the fg and bg colors consistent with `quadrant_char`'s assignment.
-/// fg = average of the two higher-luma corners,
-/// bg = average of the two lower-luma corners.
-fn fg_bg_colors(tl: GfxColor, tr: GfxColor, bl: GfxColor, br: GfxColor) -> (GfxColor, GfxColor) {
-    let _corners = [tl, tr, bl, br];
-    let mut indexed: [(u8, GfxColor); 4] = [
+/// Derive fg (brighter pair average) and bg (darker pair average) colors
+/// consistent with `quadrant_char`'s assignment.
+fn fg_bg(tl: Rgb, tr: Rgb, bl: Rgb, br: Rgb) -> (Rgb, Rgb) {
+    let mut corners = [
         (luma(tl), tl),
         (luma(tr), tr),
         (luma(bl), bl),
         (luma(br), br),
     ];
-    indexed.sort_unstable_by_key(|(l, _)| *l);
-
-    // Lower two → bg, upper two → fg
-    let bg = avg(indexed[0].1, indexed[1].1);
-    let fg = avg(indexed[2].1, indexed[3].1);
+    corners.sort_unstable_by_key(|(l, _)| *l);
+    let bg = avg(corners[0].1, corners[1].1);
+    let fg = avg(corners[2].1, corners[3].1);
     (fg, bg)
 }
 
-/// Choose the quadrant block character and fg/bg colors that best represent
-/// the four sub-pixel corners of a terminal cell.
-///
-/// Strategy: pick the two most perceptually distinct colors from the four
-/// corners as fg and bg, then assign each corner to whichever it is closer
-/// to. This handles the common case where all four corners are similar
-/// (solid color regions) without collapsing to a solid block.
-fn quadrant_char(tl: GfxColor, tr: GfxColor, bl: GfxColor, br: GfxColor) -> char {
-    let corners = [tl, tr, bl, br];
-    let lumas = corners.map(luma);
+/// Choose the quadrant block character based on which corners are above
+/// the midpoint between the min and max luma values.
+fn quadrant_char(tl: Rgb, tr: Rgb, bl: Rgb, br: Rgb) -> char {
+    let lumas = [luma(tl), luma(tr), luma(bl), luma(br)];
+    let lo = *lumas.iter().min().unwrap();
+    let hi = *lumas.iter().max().unwrap();
+    let mid = (lo + hi) / 2;
 
-    // Find the two corners with the greatest luma difference — these become
-    // our fg and bg anchors.
-    let (mut lo, mut hi) = (lumas[0], lumas[0]);
-    for &l in &lumas[1..] {
-        if l < lo {
-            lo = l;
-        }
-        if l > hi {
-            hi = l;
-        }
-    }
-    let mid = (lo as u16 + hi as u16) / 2;
-
-    // Assign each corner to fg (above mid) or bg (at or below mid).
-    // Bit layout matches QUADRANT table: TL=3, TR=2, BL=1, BR=0.
-    let idx = ((lumas[0] as u16 > mid) as usize) << 3
-        | ((lumas[1] as u16 > mid) as usize) << 2
-        | ((lumas[2] as u16 > mid) as usize) << 1
-        | ((lumas[3] as u16 > mid) as usize);
+    let idx = ((lumas[0] > mid) as usize) << 3
+        | ((lumas[1] > mid) as usize) << 2
+        | ((lumas[2] > mid) as usize) << 1
+        | ((lumas[3] > mid) as usize);
 
     QUADRANT[idx]
 }
 
-fn luma(c: GfxColor) -> u8 {
-    // BT.601 integer approximation, fast and accurate enough for ordering.
-    ((c.r as u32 * 77 + c.g as u32 * 150 + c.b as u32 * 29) >> 8) as u8
-}
-
-fn to_ratatui_color(c: GfxColor, true_color: bool) -> Color {
+fn to_color((r, g, b): Rgb, true_color: bool) -> Color {
     if true_color {
-        Color::Rgb(c.r, c.g, c.b)
+        Color::Rgb(r, g, b)
     } else {
-        // Quantise to the 216-color web-safe palette (6×6×6 cube) as a
-        // reasonable fallback for terminals without true-color support.
         let q = |v: u8| (v / 43).min(5);
-        Color::Indexed(16 + q(c.r) * 36 + q(c.g) * 6 + q(c.b))
+        Color::Indexed(16 + q(r) * 36 + q(g) * 6 + q(b))
     }
 }

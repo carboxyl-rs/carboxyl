@@ -9,8 +9,10 @@ servo = "0.1"
 url = "2.5"
 clap = { version = "4", features = ["derive"] }
 ratatui = "0.30"
-rustix = { version = "1", features = ["termios", "stdio", "fs", "process"] }
+rustix = { version = "1", features = ["termios", "stdio", "process"] }
 dpi = "0.1"
-libc = "0.2"                                                                 # only for one call :( try extinguishing it
-crossterm = "0.29.0"
+crossterm = "0.29"
 unicode-width = "0.2"
+log = "0.4"
+simplelog = "0.12"
+glam = "0.32"
