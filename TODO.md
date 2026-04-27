@@ -1,3 +1,30 @@
-Try implementing Sixel or Kitty graphics to improve that resolution (in my opinion they must be optional tho);
-Servo is immature asf and we get a stack overflow and address boundary under load (google.com) (someone gotta issue it, even though i question why since i haven't got that issue with Servo before);
-That issue with Servo demonstrates that our Panic and Signal Handling is really poor; some of the problems could be solved investigating that further. [set_hook; signal-hook; also restoring terminal with ratatui before a graceful exit];
+# TODO
+
+* Optional hi-res terminal graphics (Sixel / Kitty)
+
+  * Feature detection + ANSI fallback
+
+* Servo crashes under load (google.com)
+
+  * Stack overflow + address boundary issues
+  * Reproduce, log, open upstream issue
+
+* Panic handling is weak
+
+  * Use `set_hook`
+  * Prevent terminal corruption
+
+* Signal handling
+
+  * Use `signal-hook` (SIGINT, SIGTERM)
+  * Route to graceful shutdown
+
+* Terminal restore (ratatui)
+
+  * Must restore on panic / signal / exit
+
+* Centralize graceful exit
+
+  * Cleanup, restore, flush logs
+
+* Investigate Servo instability further
