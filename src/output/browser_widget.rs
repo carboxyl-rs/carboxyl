@@ -95,12 +95,10 @@ impl Widget for BrowserWidget<'_> {
                     cell_y * 4 + 2,
                 );
 
-                // Average pairs vertically to get fg (top) and bg (bottom).
-                let fg_color = avg(tl, tr);
-                let bg_color = avg(bl, br);
-
-                // Pick the quadrant character that best represents the
-                // brightness contrast between the four corners.
+                // Derive fg/bg colors consistent with the quadrant assignment:
+                // fg = average of the two brighter corners,
+                // bg = average of the two darker corners.
+                let (fg_color, bg_color) = fg_bg_colors(tl, tr, bl, br);
                 let char = quadrant_char(tl, tr, bl, br);
 
                 let x = area.x + cell_x as u16;
@@ -139,11 +137,12 @@ fn sample(
     let y = sy.min(frame_h - 1);
     let idx = (y * frame_w + x) * 4;
 
-    // Servo's SoftwareRenderingContext outputs BGRA8888.
+    // SoftwareRenderingContext::read_to_image returns image::RgbaImage,
+    // whose raw bytes are RGBA8888.
     GfxColor::new(
-        pixels[idx + 2], // R
+        pixels[idx],     // R
         pixels[idx + 1], // G
-        pixels[idx],     // B
+        pixels[idx + 2], // B
     )
 }
 
@@ -156,22 +155,55 @@ fn avg(a: GfxColor, b: GfxColor) -> GfxColor {
     )
 }
 
-/// Choose the quadrant block character that best encodes the four corner
-/// colours. Each quadrant is "foreground" if its luma is closer to the
-/// top-pair average than the bottom-pair average.
+/// Derive the fg and bg colors consistent with `quadrant_char`'s assignment.
+/// fg = average of the two higher-luma corners,
+/// bg = average of the two lower-luma corners.
+fn fg_bg_colors(tl: GfxColor, tr: GfxColor, bl: GfxColor, br: GfxColor) -> (GfxColor, GfxColor) {
+    let _corners = [tl, tr, bl, br];
+    let mut indexed: [(u8, GfxColor); 4] = [
+        (luma(tl), tl),
+        (luma(tr), tr),
+        (luma(bl), bl),
+        (luma(br), br),
+    ];
+    indexed.sort_unstable_by_key(|(l, _)| *l);
+
+    // Lower two → bg, upper two → fg
+    let bg = avg(indexed[0].1, indexed[1].1);
+    let fg = avg(indexed[2].1, indexed[3].1);
+    (fg, bg)
+}
+
+/// Choose the quadrant block character and fg/bg colors that best represent
+/// the four sub-pixel corners of a terminal cell.
+///
+/// Strategy: pick the two most perceptually distinct colors from the four
+/// corners as fg and bg, then assign each corner to whichever it is closer
+/// to. This handles the common case where all four corners are similar
+/// (solid color regions) without collapsing to a solid block.
 fn quadrant_char(tl: GfxColor, tr: GfxColor, bl: GfxColor, br: GfxColor) -> char {
-    let fg_luma = luma(avg(tl, tr));
-    let bg_luma = luma(avg(bl, br));
-    let mid = (fg_luma as u16 + bg_luma as u16) / 2;
+    let corners = [tl, tr, bl, br];
+    let lumas = corners.map(luma);
 
-    let tl_fg = (luma(tl) as u16) >= mid;
-    let tr_fg = (luma(tr) as u16) >= mid;
-    let bl_fg = (luma(bl) as u16) >= mid;
-    let br_fg = (luma(br) as u16) >= mid;
+    // Find the two corners with the greatest luma difference — these become
+    // our fg and bg anchors.
+    let (mut lo, mut hi) = (lumas[0], lumas[0]);
+    for &l in &lumas[1..] {
+        if l < lo {
+            lo = l;
+        }
+        if l > hi {
+            hi = l;
+        }
+    }
+    let mid = (lo as u16 + hi as u16) / 2;
 
-    // Bit layout: TL=3, TR=2, BL=1, BR=0
-    let idx =
-        (tl_fg as usize) << 3 | (tr_fg as usize) << 2 | (bl_fg as usize) << 1 | (br_fg as usize);
+    // Assign each corner to fg (above mid) or bg (at or below mid).
+    // Bit layout matches QUADRANT table: TL=3, TR=2, BL=1, BR=0.
+    let idx = ((lumas[0] as u16 > mid) as usize) << 3
+        | ((lumas[1] as u16 > mid) as usize) << 2
+        | ((lumas[2] as u16 > mid) as usize) << 1
+        | ((lumas[3] as u16 > mid) as usize);
 
     QUADRANT[idx]
 }

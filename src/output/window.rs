@@ -1,5 +1,5 @@
+use rustix::termios::{tcgetwinsize, Winsize};
 use rustix::stdio::stdout;
-use rustix::termios::{Winsize, tcgetwinsize};
 
 use crate::cli::Cli;
 use crate::gfx::Size;
@@ -31,17 +31,13 @@ impl Window {
     }
 
     pub fn update(&mut self, cli: &Cli) {
-        let Winsize {
-            ws_col,
-            ws_row,
-            ws_xpixel,
-            ws_ypixel,
-        } = tcgetwinsize(stdout()).unwrap_or(Winsize {
-            ws_col: 80,
-            ws_row: 24,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        });
+        let Winsize { ws_col, ws_row, ws_xpixel, ws_ypixel } =
+            tcgetwinsize(stdout()).unwrap_or(Winsize {
+                ws_col: 80,
+                ws_row: 24,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            });
 
         let term_cols = ws_col.max(1) as u32;
         // Reserve one row for the navigation bar.
@@ -49,27 +45,19 @@ impl Window {
 
         // If the terminal reports pixel dimensions, derive the cell size.
         // Otherwise fall back to the classic 8×16 monospace assumption.
-        let cell_pixels = if ws_xpixel > 0 && ws_ypixel > 0 {
-            Size::new(
-                ws_xpixel as f32 / ws_col as f32,
-                ws_ypixel as f32 / ws_row as f32,
-            )
-        } else {
-            Size::new(8.0, 16.0)
-        };
+        // Each terminal cell maps to a 2×4 sub-pixel region in the quadrant
+        // block encoding. The zoom level scales how many browser pixels each
+        // cell represents, giving Servo more detail to render into.
+        let zoom = cli.zoom as f32 / 100.0;
+        let scale_x = 2.0 * zoom;
+        let scale_y = 4.0 * zoom;
 
-        // Normalise the cell aspect ratio toward 1:2 (typical monospace).
-        let cell_width = (cell_pixels.width + cell_pixels.height / 2.0) / 2.0;
-        let zoom = cli.zoom as f32 * 1.5;
-
-        // Round DPI to 2 decimal places for stable viewport computations.
-        self.dpi = (2.0 / cell_width * zoom * 100.0).ceil() / 100.0;
-        // One terminal cell covers a 2×4 quadrant grid in physical pixels.
-        self.cell_pixels = Size::new(2.0, 4.0) / self.dpi;
+        self.dpi = 1.0; // kept for mouse coordinate scaling, not used for viewport sizing
+        self.cell_pixels = Size::new(scale_x, scale_y);
         self.cells = Size::new(term_cols, term_rows);
         self.browser = Size::new(
-            (term_cols as f32 * self.cell_pixels.width).ceil() as u32,
-            (term_rows as f32 * self.cell_pixels.height).ceil() as u32,
+            (term_cols as f32 * scale_x).ceil() as u32,
+            (term_rows as f32 * scale_y).ceil() as u32,
         );
     }
 

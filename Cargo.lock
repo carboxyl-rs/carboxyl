@@ -719,7 +719,6 @@ dependencies = [
 name = "carboxyl"
 version = "0.0.3"
 dependencies = [
- "chrono",
  "clap",
  "crossterm",
  "dpi",

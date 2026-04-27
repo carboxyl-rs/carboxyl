@@ -1,4 +1,3 @@
-use rustix::fd::IntoRawFd;
 use std::error::Error;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -9,27 +8,25 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture,
-    poll as ct_poll, read as ct_read,
-};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, poll as ct_poll, read as ct_read};
 use dpi::PhysicalSize;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::{DefaultTerminal, Frame};
 use rustls::crypto::CryptoProvider;
 use servo::{
     AuthenticationRequest, Code, DeviceIntPoint, DeviceIntRect, DeviceIntSize, DevicePoint,
-    EventLoopWaker, InputEvent, Key as ServoKey, KeyState, KeyboardEvent as ServoKeyboardEvent,
-    LoadStatus, Location, Modifiers as ServoModifiers, MouseButton, MouseButtonAction,
-    MouseButtonEvent, MouseMoveEvent, NamedKey, Preferences, RenderingContext, ServoBuilder,
-    ServoDelegate, ServoError, SoftwareRenderingContext, WebView, WebViewBuilder, WebViewDelegate,
+    EventLoopWaker, InputEvent, Key as ServoKey, KeyState,
+    KeyboardEvent as ServoKeyboardEvent, LoadStatus, Location,
+    Modifiers as ServoModifiers, MouseButton, MouseButtonAction, MouseButtonEvent,
+    MouseMoveEvent, NamedKey, Preferences, RenderingContext, ServoBuilder, ServoDelegate,
+    ServoError, SoftwareRenderingContext, WebView, WebViewBuilder, WebViewDelegate,
     WebViewPoint, WheelDelta, WheelEvent, WheelMode,
 };
 use url::Url;
 
 use crate::cli::Cli;
 use crate::gfx::Size;
-use crate::input::{self, Key, map_crossterm_event};
+use crate::input::{self, map_crossterm_event, Key};
 use crate::output::{BrowserFrame, BrowserWidget, NavAction, NavState, NavWidget, Window};
 use crate::utils::log;
 
@@ -86,11 +83,7 @@ enum RuntimeEvent {
 enum DelegateEvent {
     UrlChanged(String),
     TitleChanged(String),
-    HistoryChanged {
-        url: String,
-        can_go_back: bool,
-        can_go_forward: bool,
-    },
+    HistoryChanged { url: String, can_go_back: bool, can_go_forward: bool },
     Closed,
 }
 
@@ -123,35 +116,33 @@ struct TerminalWebViewDelegate {
 
 impl WebViewDelegate for TerminalWebViewDelegate {
     fn notify_url_changed(&self, _webview: WebView, url: Url) {
-        let _ = self
-            .tx
-            .try_send(RuntimeEvent::Delegate(DelegateEvent::UrlChanged(
-                url.to_string(),
-            )));
+        let _ = self.tx.try_send(RuntimeEvent::Delegate(
+            DelegateEvent::UrlChanged(url.to_string()),
+        ));
     }
 
     fn notify_page_title_changed(&self, _webview: WebView, title: Option<String>) {
         let title = title.unwrap_or_else(|| "Carboxyl".to_owned());
-        let _ = self
-            .tx
-            .try_send(RuntimeEvent::Delegate(DelegateEvent::TitleChanged(title)));
+        let _ = self.tx.try_send(RuntimeEvent::Delegate(
+            DelegateEvent::TitleChanged(title),
+        ));
     }
 
     fn notify_new_frame_ready(&self, _webview: WebView) {
-        let _ = self.tx.try_send(RuntimeEvent::FrameReady);
+        log::warning!("delegate: notify_new_frame_ready");
+        let result = self.tx.try_send(RuntimeEvent::FrameReady);
+        log::warning!("delegate: FrameReady send result: {}", result.is_ok());
     }
 
     fn notify_history_changed(&self, _webview: WebView, entries: Vec<Url>, current: usize) {
-        let Some(url) = entries.get(current) else {
-            return;
-        };
-        let _ = self
-            .tx
-            .try_send(RuntimeEvent::Delegate(DelegateEvent::HistoryChanged {
+        let Some(url) = entries.get(current) else { return };
+        let _ = self.tx.try_send(RuntimeEvent::Delegate(
+            DelegateEvent::HistoryChanged {
                 url: url.to_string(),
                 can_go_back: current > 0,
                 can_go_forward: current + 1 < entries.len(),
-            }));
+            },
+        ));
     }
 
     fn notify_animating_changed(&self, _webview: WebView, animating: bool) {
@@ -163,17 +154,11 @@ impl WebViewDelegate for TerminalWebViewDelegate {
     }
 
     fn notify_closed(&self, _webview: WebView) {
-        let _ = self
-            .tx
-            .try_send(RuntimeEvent::Delegate(DelegateEvent::Closed));
+        let _ = self.tx.try_send(RuntimeEvent::Delegate(DelegateEvent::Closed));
     }
 
     fn request_authentication(&self, _webview: WebView, request: AuthenticationRequest) {
-        let scope = if request.for_proxy() {
-            "proxy"
-        } else {
-            "origin"
-        };
+        let scope = if request.for_proxy() { "proxy" } else { "origin" };
         log::warning!(
             "authentication requested for {} ({scope}); no prompt implemented, denying",
             request.url()
@@ -203,17 +188,16 @@ struct StderrGuard {
 
 impl StderrGuard {
     fn redirect(debug: bool) -> io::Result<Self> {
-        let saved = rustix::io::dup(rustix::stdio::stderr())
-            .map_err(|e| io::Error::from_raw_os_error(e.raw_os_error()))?
-            .into_raw_fd();
+        let saved = std::os::fd::IntoRawFd::into_raw_fd(
+            rustix::io::dup(rustix::stdio::stderr())
+                .map_err(|e| io::Error::from_raw_os_error(e.raw_os_error()))?,
+        );
 
         let (sink, log_path) = if debug {
-            let path =
-                std::env::temp_dir().join(format!("carboxyl-stderr-{}.log", std::process::id()));
+            let path = std::env::temp_dir()
+                .join(format!("carboxyl-stderr-{}.log", std::process::id()));
             let f = OpenOptions::new()
-                .create(true)
-                .truncate(true)
-                .write(true)
+                .create(true).truncate(true).write(true)
                 .open(&path)?;
             (f, Some(path))
         } else {
@@ -224,18 +208,14 @@ impl StderrGuard {
             libc_dup2(sink.as_raw_fd(), 2 /* STDERR_FILENO */)?;
         }
 
-        Ok(Self {
-            saved,
-            sink,
-            log_path,
-        })
+        Ok(Self { saved, sink, log_path })
     }
 }
 
 impl Drop for StderrGuard {
     fn drop(&mut self) {
         let _ = io::stderr().flush();
-        unsafe { libc_dup2(self.saved, 2).ok() };
+        let _ = unsafe { libc_dup2(self.saved, 2) };
         unsafe { rustix::io::close(self.saved) };
 
         if let Some(path) = &self.log_path
@@ -296,9 +276,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
 
     let servo = ServoBuilder::default()
         .preferences(browser_preferences(Preferences::default()))
-        .event_loop_waker(Box::new(ChannelWaker {
-            tx: event_tx.clone(),
-        }))
+        .event_loop_waker(Box::new(ChannelWaker { tx: event_tx.clone() }))
         .build();
 
     servo.set_delegate(Rc::new(TerminalServoDelegate));
@@ -313,9 +291,8 @@ pub fn run(cli: Cli) -> AppResult<()> {
         })?,
     );
 
-    let delegate: Rc<dyn WebViewDelegate> = Rc::new(TerminalWebViewDelegate {
-        tx: event_tx.clone(),
-    });
+    let delegate: Rc<dyn WebViewDelegate> =
+        Rc::new(TerminalWebViewDelegate { tx: event_tx.clone() });
 
     let webview = WebViewBuilder::new(&servo, rendering_context.clone())
         .delegate(delegate)
@@ -378,7 +355,17 @@ fn event_loop(
             }
         }
 
+        let mut frame_pending = false;
         let should_spin = match event_rx.recv_timeout(IDLE_TIMEOUT) {
+            Ok(RuntimeEvent::Wake) => {
+                log::warning!("event: Wake");
+                true
+            }
+            Ok(RuntimeEvent::FrameReady) => {
+                log::warning!("event: FrameReady");
+                frame_pending = true;
+                true
+            }
             Ok(RuntimeEvent::Input(event)) => {
                 handle_input(
                     event,
@@ -406,14 +393,6 @@ fn event_loop(
                 true
             }
 
-            Ok(RuntimeEvent::Wake) => true,
-
-            Ok(RuntimeEvent::FrameReady) => {
-                paint_servo(webview, rendering_context.as_ref(), &mut frame, &window)?;
-                pending_paint = true;
-                // Don't spin again immediately — the frame is already painted.
-                false
-            }
 
             Ok(RuntimeEvent::Delegate(ev)) => {
                 match ev {
@@ -425,11 +404,7 @@ fn event_loop(
                         let _ = write!(io::stdout(), "\x1b]0;{title}\x07");
                         let _ = io::stdout().flush();
                     }
-                    DelegateEvent::HistoryChanged {
-                        url,
-                        can_go_back,
-                        can_go_forward,
-                    } => {
+                    DelegateEvent::HistoryChanged { url, can_go_back, can_go_forward } => {
                         nav.push(&url, can_go_back, can_go_forward);
                     }
                     DelegateEvent::Closed => {
@@ -451,6 +426,11 @@ fn event_loop(
 
         if should_spin {
             servo.spin_event_loop();
+        }
+
+        if frame_pending {
+            paint_servo(webview, rendering_context.as_ref(), &mut frame, &window)?;
+            pending_paint = true;
         }
 
         if pending_paint {
@@ -551,14 +531,10 @@ fn dispatch_nav_action(action: NavAction, webview: &WebView) -> AppResult<()> {
     match action {
         NavAction::Ignore | NavAction::Forward => {}
         NavAction::GoBack => {
-            if webview.can_go_back() {
-                webview.go_back(1);
-            }
+            if webview.can_go_back() { webview.go_back(1); }
         }
         NavAction::GoForward => {
-            if webview.can_go_forward() {
-                webview.go_forward(1);
-            }
+            if webview.can_go_forward() { webview.go_forward(1); }
         }
         NavAction::Refresh => webview.reload(),
         NavAction::GoTo(url) => webview.load(normalize_url(Some(url))?),
@@ -589,16 +565,18 @@ fn paint_servo(
         ))
     })?;
 
+    log::warning!("paint_servo: calling webview.paint()");
     webview.paint();
 
     let image = rendering_context.read_to_image(rect);
     rendering_context.present();
 
-    if let Some(img) = image {
-        *frame = Some(BrowserFrame {
-            pixels: img.into_raw(),
-            size,
-        });
+    match image {
+        None => log::warning!("paint_servo: read_to_image returned None (size={}x{})", size.width, size.height),
+        Some(img) => {
+            log::warning!("paint_servo: got image {}x{}, {} bytes", img.width(), img.height(), img.as_raw().len());
+            *frame = Some(BrowserFrame { pixels: img.into_raw(), size });
+        }
     }
 
     Ok(())
@@ -615,8 +593,11 @@ fn draw_frame(
         let area = f.area();
 
         // Split vertically: 1 row for nav bar, rest for browser.
-        let [nav_area, browser_area] =
-            Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(area);
+        let [nav_area, browser_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Fill(1),
+        ])
+        .areas(area);
 
         f.render_widget(NavWidget::new(nav), nav_area);
 
@@ -761,38 +742,18 @@ fn map_logical_key(key: &Key) -> Option<(ServoKey, Code, ServoModifiers)> {
     };
 
     match char_code {
-        0x09 => Some((ServoKey::Named(NamedKey::Tab), Code::Tab, modifiers)),
-        0x0a | 0x0d => Some((ServoKey::Named(NamedKey::Enter), Code::Enter, modifiers)),
-        0x11 => Some((ServoKey::Named(NamedKey::ArrowUp), Code::ArrowUp, modifiers)),
-        0x12 => Some((
-            ServoKey::Named(NamedKey::ArrowDown),
-            Code::ArrowDown,
-            modifiers,
-        )),
-        0x13 => Some((
-            ServoKey::Named(NamedKey::ArrowRight),
-            Code::ArrowRight,
-            modifiers,
-        )),
-        0x14 => Some((
-            ServoKey::Named(NamedKey::ArrowLeft),
-            Code::ArrowLeft,
-            modifiers,
-        )),
-        0x1b => Some((ServoKey::Named(NamedKey::Escape), Code::Escape, modifiers)),
-        0x20 => Some((ServoKey::Character(" ".into()), Code::Space, modifiers)),
-        0x7f => Some((
-            ServoKey::Named(NamedKey::Backspace),
-            Code::Backspace,
-            modifiers,
-        )),
+        0x09 => Some((ServoKey::Named(NamedKey::Tab),       Code::Tab,       modifiers)),
+        0x0a | 0x0d => Some((ServoKey::Named(NamedKey::Enter),  Code::Enter,     modifiers)),
+        0x11 => Some((ServoKey::Named(NamedKey::ArrowUp),    Code::ArrowUp,   modifiers)),
+        0x12 => Some((ServoKey::Named(NamedKey::ArrowDown),  Code::ArrowDown, modifiers)),
+        0x13 => Some((ServoKey::Named(NamedKey::ArrowRight), Code::ArrowRight,modifiers)),
+        0x14 => Some((ServoKey::Named(NamedKey::ArrowLeft),  Code::ArrowLeft, modifiers)),
+        0x1b => Some((ServoKey::Named(NamedKey::Escape),     Code::Escape,    modifiers)),
+        0x20 => Some((ServoKey::Character(" ".into()),       Code::Space,     modifiers)),
+        0x7f => Some((ServoKey::Named(NamedKey::Backspace),  Code::Backspace, modifiers)),
         v if v.is_ascii() => {
             let ch = v as char;
-            Some((
-                ServoKey::Character(ch.to_string()),
-                character_code(ch)?,
-                modifiers,
-            ))
+            Some((ServoKey::Character(ch.to_string()), character_code(ch)?, modifiers))
         }
         _ => None,
     }
@@ -800,71 +761,35 @@ fn map_logical_key(key: &Key) -> Option<(ServoKey, Code, ServoModifiers)> {
 
 fn character_code(ch: char) -> Option<Code> {
     Some(match ch.to_ascii_lowercase() {
-        'a' => Code::KeyA,
-        'b' => Code::KeyB,
-        'c' => Code::KeyC,
-        'd' => Code::KeyD,
-        'e' => Code::KeyE,
-        'f' => Code::KeyF,
-        'g' => Code::KeyG,
-        'h' => Code::KeyH,
-        'i' => Code::KeyI,
-        'j' => Code::KeyJ,
-        'k' => Code::KeyK,
-        'l' => Code::KeyL,
-        'm' => Code::KeyM,
-        'n' => Code::KeyN,
-        'o' => Code::KeyO,
-        'p' => Code::KeyP,
-        'q' => Code::KeyQ,
-        'r' => Code::KeyR,
-        's' => Code::KeyS,
-        't' => Code::KeyT,
-        'u' => Code::KeyU,
-        'v' => Code::KeyV,
-        'w' => Code::KeyW,
-        'x' => Code::KeyX,
-        'y' => Code::KeyY,
-        'z' => Code::KeyZ,
-        '0' => Code::Digit0,
-        '1' => Code::Digit1,
-        '2' => Code::Digit2,
-        '3' => Code::Digit3,
-        '4' => Code::Digit4,
-        '5' => Code::Digit5,
-        '6' => Code::Digit6,
-        '7' => Code::Digit7,
-        '8' => Code::Digit8,
+        'a' => Code::KeyA,   'b' => Code::KeyB,   'c' => Code::KeyC,
+        'd' => Code::KeyD,   'e' => Code::KeyE,   'f' => Code::KeyF,
+        'g' => Code::KeyG,   'h' => Code::KeyH,   'i' => Code::KeyI,
+        'j' => Code::KeyJ,   'k' => Code::KeyK,   'l' => Code::KeyL,
+        'm' => Code::KeyM,   'n' => Code::KeyN,   'o' => Code::KeyO,
+        'p' => Code::KeyP,   'q' => Code::KeyQ,   'r' => Code::KeyR,
+        's' => Code::KeyS,   't' => Code::KeyT,   'u' => Code::KeyU,
+        'v' => Code::KeyV,   'w' => Code::KeyW,   'x' => Code::KeyX,
+        'y' => Code::KeyY,   'z' => Code::KeyZ,
+        '0' => Code::Digit0, '1' => Code::Digit1, '2' => Code::Digit2,
+        '3' => Code::Digit3, '4' => Code::Digit4, '5' => Code::Digit5,
+        '6' => Code::Digit6, '7' => Code::Digit7, '8' => Code::Digit8,
         '9' => Code::Digit9,
-        '-' => Code::Minus,
-        '=' => Code::Equal,
-        '[' => Code::BracketLeft,
-        ']' => Code::BracketRight,
-        '\\' => Code::Backslash,
-        ';' => Code::Semicolon,
-        '\'' => Code::Quote,
-        ',' => Code::Comma,
-        '.' => Code::Period,
-        '/' => Code::Slash,
-        '`' => Code::Backquote,
+        '-'  => Code::Minus,       '='  => Code::Equal,
+        '['  => Code::BracketLeft, ']'  => Code::BracketRight,
+        '\\' => Code::Backslash,   ';'  => Code::Semicolon,
+        '\'' => Code::Quote,       ','  => Code::Comma,
+        '.'  => Code::Period,      '/'  => Code::Slash,
+        '`'  => Code::Backquote,
         _ => return None,
     })
 }
 
 fn modifiers_from_key(key: &Key) -> ServoModifiers {
     let mut m = ServoModifiers::empty();
-    if key.modifiers.alt {
-        m |= ServoModifiers::ALT;
-    }
-    if key.modifiers.ctrl {
-        m |= ServoModifiers::CONTROL;
-    }
-    if key.modifiers.meta {
-        m |= ServoModifiers::META;
-    }
-    if key.modifiers.shift {
-        m |= ServoModifiers::SHIFT;
-    }
+    if key.modifiers.alt  { m |= ServoModifiers::ALT;     }
+    if key.modifiers.ctrl { m |= ServoModifiers::CONTROL;  }
+    if key.modifiers.meta { m |= ServoModifiers::META;     }
+    if key.modifiers.shift{ m |= ServoModifiers::SHIFT;    }
     m
 }
 
