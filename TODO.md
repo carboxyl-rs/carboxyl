@@ -4,7 +4,7 @@
 
   * Feature detection + ANSI fallback
 
-* Servo crashes under load (google.com)
+* Servo crashes under load (looks like to be a problem on debug builds)
 
   * Stack overflow + address boundary issues
   * Reproduce, log, open upstream issue
@@ -26,8 +26,6 @@
 * Centralize graceful exit
 
   * Cleanup, restore, flush logs
-
-* Investigate Servo instability further
 
 * Docker image
 
