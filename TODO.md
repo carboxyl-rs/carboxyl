@@ -4,7 +4,11 @@
 
   * Feature detection + ANSI fallback
 
-* Servo crashes under load (looks like to be a problem on debug builds)
+* Text rendering using terminal native text
+
+* Implement Standarized GitHub CI/CD/Workflow
+
+* Servo crashes under load (looks like to be a more a problem on debug builds)
 
   * Stack overflow + address boundary issues
   * Reproduce, log, open upstream issue
