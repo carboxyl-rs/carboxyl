@@ -45,6 +45,30 @@ impl KeyMods {
     }
 }
 
+/// Returns true if this crossterm event is a mouse event. Used to detect
+/// the SGR 'm'/'M' terminator leak bug (see `is_sgr_artifact` below).
+pub fn is_mouse_event(event: &CrosstermEvent) -> bool {
+    matches!(event, CrosstermEvent::Mouse(_))
+}
+
+/// In SGR mouse mode, mouse release events are terminated with a lowercase
+/// 'm' and press events with uppercase 'M'. If crossterm reads a mouse event
+/// and a key event from the same buffer, the 'm'/'M' terminator can leak
+/// through as a spurious `KeyCode::Char('m'/'M')` with no modifiers.
+///
+/// This is a known crossterm bug. We suppress the artifact when it
+/// immediately follows a mouse event in the same read cycle.
+pub fn is_sgr_artifact(event: &CrosstermEvent) -> bool {
+    matches!(
+        event,
+        CrosstermEvent::Key(KeyEvent {
+            code: KeyCode::Char('m') | KeyCode::Char('M'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        })
+    )
+}
+
 /// Translate a crossterm `KeyEvent` into our `Key`, returning `None` for
 /// keys we don't handle (function keys, media keys, etc.).
 pub fn map_key_event(event: KeyEvent) -> Option<Key> {
@@ -52,7 +76,6 @@ pub fn map_key_event(event: KeyEvent) -> Option<Key> {
 
     let char = match event.code {
         KeyCode::Char(c) if event.modifiers.contains(KeyModifiers::CONTROL) => {
-            // Ctrl+A–Z → 0x01–0x1a
             let lower = c.to_ascii_lowercase();
             if lower.is_ascii_alphabetic() {
                 lower as u8 - b'a' + 1
@@ -80,11 +103,9 @@ pub fn map_key_event(event: KeyEvent) -> Option<Key> {
 }
 
 /// Translate a crossterm `Event` into zero or more of our `Event`s.
-/// Returns an empty vec for events we don't care about.
 pub fn map_crossterm_event(event: CrosstermEvent) -> Vec<Event> {
     match event {
         CrosstermEvent::Key(key_event) => {
-            // Ctrl-C → exit
             if key_event.code == KeyCode::Char('c')
                 && key_event.modifiers.contains(KeyModifiers::CONTROL)
             {
@@ -111,10 +132,7 @@ pub fn map_crossterm_event(event: CrosstermEvent) -> Vec<Event> {
             _ => vec![],
         },
 
-        // Terminal resize is handled by the main loop polling crossterm
-        // directly; we don't need to forward it as an event here.
         CrosstermEvent::Resize(..) => vec![],
-
         _ => vec![],
     }
 }

@@ -1,15 +1,12 @@
-use std::error::Error;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, poll as ct_poll, read as ct_read,
-};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, poll as ct_poll, read as ct_read};
 use dpi::PhysicalSize;
 use glam::{UVec2, Vec2};
 use log::{error, warn};
@@ -18,24 +15,25 @@ use ratatui::{DefaultTerminal, Frame};
 use rustls::crypto::CryptoProvider;
 use servo::{
     AuthenticationRequest, Code, DeviceIntPoint, DeviceIntRect, DeviceIntSize, DevicePoint,
-    EventLoopWaker, InputEvent, Key as ServoKey, KeyState,
-    KeyboardEvent as ServoKeyboardEvent, LoadStatus, Location,
-    Modifiers as ServoModifiers, MouseButton, MouseButtonAction, MouseButtonEvent,
-    MouseMoveEvent, NamedKey, Preferences, RenderingContext, ServoBuilder, ServoDelegate,
-    ServoError, SoftwareRenderingContext, WebView, WebViewBuilder, WebViewDelegate,
+    EventLoopWaker, InputEvent, Key as ServoKey, KeyState, KeyboardEvent as ServoKeyboardEvent,
+    LoadStatus, Location, Modifiers as ServoModifiers, MouseButton, MouseButtonAction,
+    MouseButtonEvent, MouseMoveEvent, NamedKey, Preferences, RenderingContext, ServoBuilder,
+    ServoDelegate, ServoError, SoftwareRenderingContext, WebView, WebViewBuilder, WebViewDelegate,
     WebViewPoint, WheelDelta, WheelEvent, WheelMode,
 };
+use signal_hook::consts::{SIGINT, SIGPIPE, SIGTERM};
+use signal_hook::iterator::Signals;
 use simplelog::{Config, LevelFilter, WriteLogger};
 use url::Url;
 
 use crate::cli::Cli;
-use crate::input::{self, Key, map_crossterm_event};
+use crate::input::{self, Key, is_mouse_event, is_sgr_artifact, map_crossterm_event};
 use crate::output::{BrowserFrame, BrowserWidget, NavAction, NavState, NavWidget, Window};
 
-pub type AppResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
+pub type AppResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 // ---------------------------------------------------------------------------
-// Geometry helpers
+// Geometry
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -62,24 +60,28 @@ fn physical_size(size: UVec2) -> PhysicalSize<u32> {
 // Event model
 // ---------------------------------------------------------------------------
 
-/// Everything the main loop can receive.
 enum RuntimeEvent {
     Input(input::Event),
+    /// Servo needs the loop to consider painting.
     Wake,
+    /// A fully composited frame from the Servo thread.
     Frame(BrowserFrame),
     Delegate(DelegateEvent),
     Exit,
 }
 
-/// Updates originating from WebView delegate callbacks on the Servo thread.
 enum DelegateEvent {
     UrlChanged(String),
     TitleChanged(String),
-    HistoryChanged { url: String, can_go_back: bool, can_go_forward: bool },
+    HistoryChanged {
+        url: String,
+        can_go_back: bool,
+        can_go_forward: bool,
+    },
     Closed,
 }
 
-/// Commands the main thread sends to the Servo thread.
+/// Commands sent from the main loop to the Servo thread.
 enum ServoCommand {
     Load(Url),
     GoBack,
@@ -87,12 +89,13 @@ enum ServoCommand {
     Reload,
     Resize(PhysicalSize<u32>),
     Input(InputEvent),
+    /// Composite and send back a frame if anything changed.
     Paint,
     Shutdown,
 }
 
 // ---------------------------------------------------------------------------
-// Servo EventLoopWaker — wakes the Servo thread's own recv loop
+// Servo EventLoopWaker — wakes the Servo thread via ServoCommand::Paint
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]
@@ -106,13 +109,12 @@ impl EventLoopWaker for ServoWaker {
     }
 
     fn wake(&self) {
-        // An empty paint request is enough to wake the Servo thread.
         let _ = self.tx.try_send(ServoCommand::Paint);
     }
 }
 
 // ---------------------------------------------------------------------------
-// WebView delegate — pure event emitter to the main loop
+// WebView delegate — pure event emitter, owns nothing
 // ---------------------------------------------------------------------------
 
 struct TerminalWebViewDelegate {
@@ -121,34 +123,35 @@ struct TerminalWebViewDelegate {
 
 impl WebViewDelegate for TerminalWebViewDelegate {
     fn notify_url_changed(&self, _: WebView, url: Url) {
-        let _ = self.event_tx.try_send(RuntimeEvent::Delegate(
-            DelegateEvent::UrlChanged(url.to_string()),
-        ));
+        let _ = self
+            .event_tx
+            .try_send(RuntimeEvent::Delegate(DelegateEvent::UrlChanged(
+                url.to_string(),
+            )));
     }
 
     fn notify_page_title_changed(&self, _: WebView, title: Option<String>) {
         let title = title.unwrap_or_else(|| "Carboxyl".to_owned());
-        let _ = self.event_tx.try_send(RuntimeEvent::Delegate(
-            DelegateEvent::TitleChanged(title),
-        ));
+        let _ = self
+            .event_tx
+            .try_send(RuntimeEvent::Delegate(DelegateEvent::TitleChanged(title)));
     }
 
     fn notify_new_frame_ready(&self, _: WebView) {
-        // Signal the Servo thread to paint; it will send Frame back.
-        // We don't paint inline here because the Servo thread owns the
-        // rendering context.
         let _ = self.event_tx.try_send(RuntimeEvent::Wake);
     }
 
     fn notify_history_changed(&self, _: WebView, entries: Vec<Url>, current: usize) {
-        let Some(url) = entries.get(current) else { return };
-        let _ = self.event_tx.try_send(RuntimeEvent::Delegate(
-            DelegateEvent::HistoryChanged {
+        let Some(url) = entries.get(current) else {
+            return;
+        };
+        let _ = self
+            .event_tx
+            .try_send(RuntimeEvent::Delegate(DelegateEvent::HistoryChanged {
                 url: url.to_string(),
                 can_go_back: current > 0,
                 can_go_forward: current + 1 < entries.len(),
-            },
-        ));
+            }));
     }
 
     fn notify_animating_changed(&self, _: WebView, animating: bool) {
@@ -158,11 +161,17 @@ impl WebViewDelegate for TerminalWebViewDelegate {
     }
 
     fn notify_closed(&self, _: WebView) {
-        let _ = self.event_tx.try_send(RuntimeEvent::Delegate(DelegateEvent::Closed));
+        let _ = self
+            .event_tx
+            .try_send(RuntimeEvent::Delegate(DelegateEvent::Closed));
     }
 
     fn request_authentication(&self, _: WebView, request: AuthenticationRequest) {
-        let scope = if request.for_proxy() { "proxy" } else { "origin" };
+        let scope = if request.for_proxy() {
+            "proxy"
+        } else {
+            "origin"
+        };
         warn!(
             "authentication requested for {} ({scope}); no prompt implemented, denying",
             request.url()
@@ -181,26 +190,61 @@ impl ServoDelegate for TerminalServoDelegate {
 }
 
 // ---------------------------------------------------------------------------
-// Logger setup
+// Logger
 // ---------------------------------------------------------------------------
 
 fn init_logger(debug: bool) -> io::Result<Option<PathBuf>> {
     if !debug {
-        // In release mode, swallow all logs below error level.
-        WriteLogger::init(LevelFilter::Error, Config::default(), io::sink())
-            .ok();
+        WriteLogger::init(LevelFilter::Error, Config::default(), io::sink()).ok();
         return Ok(None);
     }
 
-    let path = std::env::temp_dir()
-        .join(format!("carboxyl-{}.log", std::process::id()));
+    let path = std::env::temp_dir().join(format!("carboxyl-{}.log", std::process::id()));
     let file = OpenOptions::new()
-        .create(true).truncate(true).write(true)
+        .create(true)
+        .truncate(true)
+        .write(true)
         .open(&path)?;
 
     WriteLogger::init(LevelFilter::Debug, Config::default(), file).ok();
-
     Ok(Some(path))
+}
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown
+//
+// Called from the normal exit path. The panic hook in main.rs calls
+// ratatui::restore() independently because at panic time the terminal handle
+// may already be gone.
+// ---------------------------------------------------------------------------
+
+fn shutdown(
+    servo_tx: &mpsc::SyncSender<ServoCommand>,
+    servo_handle: thread::JoinHandle<()>,
+    log_path: Option<PathBuf>,
+) {
+    let _ = servo_tx.try_send(ServoCommand::Shutdown);
+
+    // Give Servo up to 2s to shut down cleanly before abandoning the join.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !servo_handle.is_finished() {
+        if Instant::now() >= deadline {
+            warn!("servo thread did not exit in time, abandoning");
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    crossterm::execute!(io::stdout(), DisableMouseCapture).ok();
+    ratatui::restore();
+
+    if let Some(path) = log_path
+        && std::fs::metadata(&path)
+            .map(|m| m.len() > 0)
+            .unwrap_or(false)
+    {
+        eprintln!("carboxyl logs written to {}", path.display());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -212,69 +256,47 @@ pub fn run(cli: Cli) -> AppResult<()> {
 
     ensure_rustls_provider_installed();
 
-    // Bounded channels — bounded prevents unbounded memory growth under load.
     let (event_tx, event_rx) = mpsc::sync_channel::<RuntimeEvent>(512);
     let (servo_tx, servo_rx) = mpsc::sync_channel::<ServoCommand>(128);
 
-    let window = {
-        // Read window size before ratatui enters alt screen, so TIOCGWINSZ
-        // reflects the real terminal dimensions.
-        let terminal = ratatui::init();
-        crossterm::execute!(io::stdout(), EnableMouseCapture)?;
-        let w = Window::read(&cli);
-        (terminal, w)
-    };
-    let (terminal, window) = window;
+    let terminal = ratatui::init();
+    crossterm::execute!(io::stdout(), EnableMouseCapture)?;
 
-    // Spawn the Servo thread — Servo and WebView are created inside so they
-    // never need to be Send.
+    let window = Window::read(&cli);
+
+    // Servo thread — owns Servo, WebView, and the rendering context.
     let servo_handle = {
         let event_tx = event_tx.clone();
         let servo_tx_waker = servo_tx.clone();
         let url = normalize_url(cli.url.clone())?;
         let browser_size = physical_size(window.browser);
-        thread::spawn(move || {
-            servo_thread(
-                event_tx,
-                servo_tx_waker,
-                servo_rx,
-                url,
-                browser_size,
-            );
-        })
+
+        // Servo's style system recurses deeply, especially in debug builds.
+        // A 64MB stack prevents stack overflows on complex pages.
+        thread::Builder::new()
+            .name("servo".to_owned())
+            .stack_size(64 * 1024 * 1024)
+            .spawn(move || {
+                servo_thread(event_tx, servo_tx_waker, servo_rx, url, browser_size);
+            })
+            .expect("failed to spawn servo thread")
     };
 
+    // Signal thread — routes SIGINT/SIGTERM/SIGPIPE to RuntimeEvent::Exit.
+    let _signal = spawn_signal_thread(event_tx.clone());
+
+    // Input thread — translates crossterm events.
     let _input = spawn_input_thread(event_tx.clone());
 
-    let result = event_loop(
-        servo_tx.clone(),
-        terminal,
-        window,
-        &cli,
-        event_rx,
-    );
+    let result = event_loop(servo_tx.clone(), terminal, window, &cli, event_rx);
 
-    let _ = servo_tx.try_send(ServoCommand::Shutdown);
-    let _ = servo_handle.join();
-
-    crossterm::execute!(io::stdout(), DisableMouseCapture)?;
-    ratatui::restore();
-
-    if let Some(path) = log_path
-        && std::fs::metadata(&path).map(|m| m.len() > 0).unwrap_or(false)
-    {
-        eprintln!("carboxyl logs written to {}", path.display());
-    }
+    shutdown(&servo_tx, servo_handle, log_path);
 
     result
 }
 
 // ---------------------------------------------------------------------------
 // Servo thread
-//
-// Owns `servo::Servo`, `WebView`, and the `SoftwareRenderingContext`.
-// Receives `ServoCommand`s and sends back frames + delegate events via
-// the shared `event_tx`.
 // ---------------------------------------------------------------------------
 
 fn servo_thread(
@@ -284,18 +306,6 @@ fn servo_thread(
     url: Url,
     browser_size: PhysicalSize<u32>,
 ) {
-    // If Servo's internal threads panic (e.g. StyleThread stack overflow on
-    // complex pages), send Exit so the main loop restores the terminal cleanly.
-    {
-        let tx = event_tx.clone();
-        let default_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            error!("servo panic: {info}");
-            let _ = tx.try_send(RuntimeEvent::Exit);
-            default_hook(info);
-        }));
-    }
-
     let servo = ServoBuilder::default()
         .preferences(browser_preferences(Preferences::default()))
         .event_loop_waker(Box::new(ServoWaker { tx: servo_tx }))
@@ -303,13 +313,15 @@ fn servo_thread(
 
     servo.set_delegate(Rc::new(TerminalServoDelegate));
 
-    let rendering_context: Rc<dyn RenderingContext> = match SoftwareRenderingContext::new(browser_size) {
-        Ok(ctx) => Rc::new(ctx),
-        Err(e) => {
-            error!("failed to create rendering context: {e:?}");
-            return;
-        }
-    };
+    let rendering_context: Rc<dyn RenderingContext> =
+        match SoftwareRenderingContext::new(browser_size) {
+            Ok(ctx) => Rc::new(ctx),
+            Err(e) => {
+                error!("failed to create rendering context: {e:?}");
+                let _ = event_tx.try_send(RuntimeEvent::Exit);
+                return;
+            }
+        };
 
     let delegate: Rc<dyn WebViewDelegate> = Rc::new(TerminalWebViewDelegate {
         event_tx: event_tx.clone(),
@@ -323,33 +335,41 @@ fn servo_thread(
     webview.show();
     webview.focus();
 
-    // Drain initial wakes so we spin at least once before blocking.
-    let _ = event_tx.try_send(RuntimeEvent::Wake);
-
     while let Ok(cmd) = servo_rx.recv() {
-
         let mut should_paint = false;
         let mut new_size: Option<PhysicalSize<u32>> = None;
+        let mut shutdown = false;
 
-        let mut handle = |cmd: ServoCommand| -> bool {
-            match cmd {
-                ServoCommand::Shutdown => return false,
-                ServoCommand::Load(url) => webview.load(url),
-                ServoCommand::GoBack => { if webview.can_go_back() { webview.go_back(1); } }
-                ServoCommand::GoForward => { if webview.can_go_forward() { webview.go_forward(1); } }
-                ServoCommand::Reload => webview.reload(),
-                ServoCommand::Resize(size) => new_size = Some(size),
-                ServoCommand::Input(ev) => { webview.notify_input_event(ev); }
-                ServoCommand::Paint => should_paint = true,
+        let mut handle = |cmd: ServoCommand| match cmd {
+            ServoCommand::Shutdown => shutdown = true,
+            ServoCommand::Load(url) => webview.load(url),
+            ServoCommand::GoBack => {
+                if webview.can_go_back() {
+                    webview.go_back(1);
+                }
             }
-            true
+            ServoCommand::GoForward => {
+                if webview.can_go_forward() {
+                    webview.go_forward(1);
+                }
+            }
+            ServoCommand::Reload => webview.reload(),
+            ServoCommand::Resize(size) => new_size = Some(size),
+            ServoCommand::Input(ev) => {
+                webview.notify_input_event(ev);
+            }
+            ServoCommand::Paint => should_paint = true,
         };
 
-        if !handle(cmd) { break; }
+        handle(cmd);
 
-        // Drain any additional pending commands.
+        // Drain all pending commands before spinning.
         while let Ok(cmd) = servo_rx.try_recv() {
-            if !handle(cmd) { break; }
+            handle(cmd);
+        }
+
+        if shutdown {
+            break;
         }
 
         if let Some(size) = new_size {
@@ -360,11 +380,13 @@ fn servo_thread(
 
         servo.spin_event_loop();
 
-        if should_paint
-            && let Some(frame) = paint(&webview, rendering_context.as_ref())
-        {
+        if should_paint && let Some(frame) = paint(&webview, rendering_context.as_ref()) {
             let _ = event_tx.try_send(RuntimeEvent::Frame(frame));
         }
+
+        // Yield briefly so the OS can schedule the input and main threads,
+        // preventing Servo's workers from starving them under heavy load.
+        thread::sleep(Duration::from_millis(1));
     }
 }
 
@@ -372,22 +394,23 @@ fn paint(webview: &WebView, ctx: &dyn RenderingContext) -> Option<BrowserFrame> 
     ctx.make_current().ok()?;
     webview.paint();
 
-    let image = ctx.read_to_image(DeviceIntRect::from_origin_and_size(
+    let size = ctx.size();
+    let rect = DeviceIntRect::from_origin_and_size(
         DeviceIntPoint::new(0, 0),
-        DeviceIntSize::new(
-            ctx.size().width as i32,
-            ctx.size().height as i32,
-        ),
-    ))?;
+        DeviceIntSize::new(size.width as i32, size.height as i32),
+    );
 
+    let image = ctx.read_to_image(rect)?;
     ctx.present();
 
-    let size = UVec2::new(image.width(), image.height());
-    Some(BrowserFrame { pixels: image.into_raw(), size })
+    Some(BrowserFrame {
+        size: UVec2::new(image.width(), image.height()),
+        pixels: image.into_raw(),
+    })
 }
 
 // ---------------------------------------------------------------------------
-// Main event loop — owns all UI state, never touches Servo directly
+// Main event loop
 // ---------------------------------------------------------------------------
 
 fn event_loop(
@@ -404,14 +427,14 @@ fn event_loop(
     let mut running = true;
     let mut pending_paint = true;
 
-    // fps cap: minimum ms between ratatui draws
     let frame_budget = Duration::from_millis(1000 / cli.fps.max(1) as u64);
-    let mut last_draw = std::time::Instant::now() - frame_budget;
+    let mut last_draw = Instant::now() - frame_budget;
+    // Rate-limit Paint commands sent to Servo to match the fps cap.
+    let mut last_paint_cmd = Instant::now() - frame_budget;
 
-    const IDLE_TIMEOUT: Duration = Duration::from_millis(250);
+    const IDLE_TIMEOUT: Duration = Duration::from_millis(50);
 
     while running {
-        // Detect terminal resize.
         let next = Window::read(cli);
         if next.differs_from(&window) {
             let _ = servo_tx.try_send(ServoCommand::Resize(physical_size(next.browser)));
@@ -421,15 +444,37 @@ fn event_loop(
 
         match event_rx.recv_timeout(IDLE_TIMEOUT) {
             Ok(RuntimeEvent::Input(event)) => {
-                handle_input(event, &servo_tx, &window, &mut nav, &mut pointer, &mut true_color, &mut running)?;
+                handle_input(
+                    event,
+                    &servo_tx,
+                    &window,
+                    &mut nav,
+                    &mut pointer,
+                    &mut true_color,
+                    &mut running,
+                )?;
                 while let Ok(RuntimeEvent::Input(event)) = event_rx.try_recv() {
-                    handle_input(event, &servo_tx, &window, &mut nav, &mut pointer, &mut true_color, &mut running)?;
+                    handle_input(
+                        event,
+                        &servo_tx,
+                        &window,
+                        &mut nav,
+                        &mut pointer,
+                        &mut true_color,
+                        &mut running,
+                    )?;
                 }
                 pending_paint = true;
             }
 
             Ok(RuntimeEvent::Wake) => {
-                let _ = servo_tx.try_send(ServoCommand::Paint);
+                // Rate-limit: only forward a Paint command if the frame budget
+                // has elapsed since the last one. This prevents the Servo thread
+                // from being flooded with Paint requests on heavy pages.
+                if last_paint_cmd.elapsed() >= frame_budget {
+                    let _ = servo_tx.try_send(ServoCommand::Paint);
+                    last_paint_cmd = Instant::now();
+                }
             }
 
             Ok(RuntimeEvent::Frame(f)) => {
@@ -446,7 +491,11 @@ fn event_loop(
                         let _ = write!(io::stdout(), "\x1b]0;{title}\x07");
                         let _ = io::stdout().flush();
                     }
-                    DelegateEvent::HistoryChanged { url, can_go_back, can_go_forward } => {
+                    DelegateEvent::HistoryChanged {
+                        url,
+                        can_go_back,
+                        can_go_forward,
+                    } => {
                         nav.push(&url, can_go_back, can_go_forward);
                     }
                     DelegateEvent::Closed => running = false,
@@ -459,10 +508,9 @@ fn event_loop(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
 
-        // Rate-limit draws to cli.fps.
         if pending_paint && last_draw.elapsed() >= frame_budget {
             pending_paint = false;
-            last_draw = std::time::Instant::now();
+            last_draw = Instant::now();
             draw_frame(&mut terminal, &nav, frame.as_ref(), true_color)?;
         }
     }
@@ -517,7 +565,9 @@ fn handle_input(
                 let p = BrowserPoint::from_cell(window, col, row);
                 *pointer = p;
                 let ev = InputEvent::MouseButton(MouseButtonEvent::new(
-                    MouseButtonAction::Down, MouseButton::Left, p.to_webview_point(),
+                    MouseButtonAction::Down,
+                    MouseButton::Left,
+                    p.to_webview_point(),
                 ));
                 let _ = servo_tx.try_send(ServoCommand::Input(ev));
             } else {
@@ -531,7 +581,9 @@ fn handle_input(
                 let p = BrowserPoint::from_cell(window, col, row);
                 *pointer = p;
                 let ev = InputEvent::MouseButton(MouseButtonEvent::new(
-                    MouseButtonAction::Up, MouseButton::Left, p.to_webview_point(),
+                    MouseButtonAction::Up,
+                    MouseButton::Left,
+                    p.to_webview_point(),
                 ));
                 let _ = servo_tx.try_send(ServoCommand::Input(ev));
             } else {
@@ -553,9 +605,15 @@ fn handle_input(
 fn dispatch_nav(action: NavAction, servo_tx: &mpsc::SyncSender<ServoCommand>) -> AppResult<()> {
     match action {
         NavAction::Ignore | NavAction::Forward => {}
-        NavAction::GoBack    => { let _ = servo_tx.try_send(ServoCommand::GoBack); }
-        NavAction::GoForward => { let _ = servo_tx.try_send(ServoCommand::GoForward); }
-        NavAction::Refresh   => { let _ = servo_tx.try_send(ServoCommand::Reload); }
+        NavAction::GoBack => {
+            let _ = servo_tx.try_send(ServoCommand::GoBack);
+        }
+        NavAction::GoForward => {
+            let _ = servo_tx.try_send(ServoCommand::GoForward);
+        }
+        NavAction::Refresh => {
+            let _ = servo_tx.try_send(ServoCommand::Reload);
+        }
         NavAction::GoTo(url) => {
             let _ = servo_tx.try_send(ServoCommand::Load(normalize_url(Some(url))?));
         }
@@ -592,29 +650,52 @@ fn draw_frame(
 }
 
 // ---------------------------------------------------------------------------
-// Input thread — pure crossterm translator, never touches Servo or state
+// Input thread — pure crossterm translator
 // ---------------------------------------------------------------------------
 
 fn spawn_input_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
+        // Track whether the previous crossterm event was a mouse event so we
+        // can suppress the SGR 'm'/'M' terminator artifact on the next read.
+        let mut last_was_mouse = false;
+
         loop {
             match ct_poll(Duration::from_millis(100)) {
-                Err(e) => { error!("crossterm poll: {e}"); break; }
+                Err(e) => {
+                    error!("crossterm poll: {e}");
+                    break;
+                }
                 Ok(false) => {
-                    // Channel liveness check.
-                    if tx.try_send(RuntimeEvent::Wake).is_err() { break; }
+                    if tx.try_send(RuntimeEvent::Wake).is_err() {
+                        break;
+                    }
                     continue;
                 }
                 Ok(true) => {}
             }
 
             match ct_read() {
-                Err(e) => { error!("crossterm read: {e}"); break; }
+                Err(e) => {
+                    error!("crossterm read: {e}");
+                    break;
+                }
                 Ok(ev) => {
+                    // Suppress the spurious 'm'/'M' keypress that crossterm
+                    // emits when an SGR mouse release event and a keypress
+                    // arrive in the same read buffer.
+                    if last_was_mouse && is_sgr_artifact(&ev) {
+                        last_was_mouse = false;
+                        continue;
+                    }
+
+                    last_was_mouse = is_mouse_event(&ev);
+
                     for event in map_crossterm_event(ev) {
                         let is_exit = matches!(event, input::Event::Exit);
                         let _ = tx.try_send(RuntimeEvent::Input(event));
-                        if is_exit { return; }
+                        if is_exit {
+                            return;
+                        }
                     }
                 }
             }
@@ -622,6 +703,58 @@ fn spawn_input_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHandle<
 
         let _ = tx.try_send(RuntimeEvent::Exit);
     })
+}
+
+// ---------------------------------------------------------------------------
+// Signal thread — routes OS signals to RuntimeEvent::Exit
+// ---------------------------------------------------------------------------
+
+fn spawn_signal_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        // SIGINT/SIGTERM/SIGPIPE are safe to intercept via the iterator.
+        // SIGSEGV/SIGBUS (stack overflow) are fatal signals that require
+        // unsafe signal handlers — we don't handle those here. Release builds
+        // don't stack overflow, and the global panic hook in main.rs covers
+        // Rust panics. For debug-mode crashes, terminal corruption is accepted.
+        let mut signals = match Signals::new([SIGINT, SIGTERM, SIGPIPE]) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("failed to register signal handlers: {e}");
+                return;
+            }
+        };
+
+        if let Some(sig) = signals.forever().next() {
+            warn!("received signal {sig}, shutting down");
+            let _ = tx.try_send(RuntimeEvent::Exit);
+        }
+    })
+}
+
+// ---------------------------------------------------------------------------
+// URL normalisation
+// ---------------------------------------------------------------------------
+
+fn normalize_url(raw: Option<String>) -> AppResult<Url> {
+    let Some(raw) = raw else {
+        return Ok(Url::parse("about:blank")?);
+    };
+
+    if raw.contains("://") || raw.starts_with("about:") {
+        return Ok(Url::parse(&raw)?);
+    }
+
+    if Path::new(&raw).exists() {
+        return Url::from_file_path(Path::new(&raw)).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("failed to convert path to file URL: {raw}"),
+            )
+            .into()
+        });
+    }
+
+    Ok(Url::parse(&format!("https://{raw}"))?)
 }
 
 // ---------------------------------------------------------------------------
@@ -641,25 +774,6 @@ fn ensure_rustls_provider_installed() {
     }
 }
 
-fn normalize_url(raw: Option<String>) -> AppResult<Url> {
-    let Some(raw) = raw else { return Ok(Url::parse("about:blank")?); };
-
-    if raw.contains("://") || raw.starts_with("about:") {
-        return Ok(Url::parse(&raw)?);
-    }
-
-    if Path::new(&raw).exists() {
-        return Url::from_file_path(Path::new(&raw)).map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("failed to convert path to file URL: {raw}"),
-            ).into()
-        });
-    }
-
-    Ok(Url::parse(&format!("https://{raw}"))?)
-}
-
 // ---------------------------------------------------------------------------
 // Keyboard mapping
 // ---------------------------------------------------------------------------
@@ -668,9 +782,17 @@ fn map_keyboard_event(key: &Key) -> Option<(ServoKeyboardEvent, ServoKeyboardEve
     let (logical_key, code, mut modifiers) = map_logical_key(key)?;
     modifiers |= modifiers_from_key(key);
 
-    let make = |state| ServoKeyboardEvent::new_without_event(
-        state, logical_key.clone(), code, Location::Standard, modifiers, false, false,
-    );
+    let make = |state| {
+        ServoKeyboardEvent::new_without_event(
+            state,
+            logical_key.clone(),
+            code,
+            Location::Standard,
+            modifiers,
+            false,
+            false,
+        )
+    };
 
     Some((make(KeyState::Down), make(KeyState::Up)))
 }
@@ -681,21 +803,45 @@ fn map_logical_key(key: &Key) -> Option<(ServoKey, Code, ServoModifiers)> {
         v => (v, false),
     };
 
-    let modifiers = if forced_ctrl { ServoModifiers::CONTROL } else { ServoModifiers::empty() };
+    let modifiers = if forced_ctrl {
+        ServoModifiers::CONTROL
+    } else {
+        ServoModifiers::empty()
+    };
 
     match char_code {
-        0x09 => Some((ServoKey::Named(NamedKey::Tab),       Code::Tab,        modifiers)),
-        0x0a | 0x0d => Some((ServoKey::Named(NamedKey::Enter),  Code::Enter,  modifiers)),
-        0x11 => Some((ServoKey::Named(NamedKey::ArrowUp),    Code::ArrowUp,   modifiers)),
-        0x12 => Some((ServoKey::Named(NamedKey::ArrowDown),  Code::ArrowDown, modifiers)),
-        0x13 => Some((ServoKey::Named(NamedKey::ArrowRight), Code::ArrowRight,modifiers)),
-        0x14 => Some((ServoKey::Named(NamedKey::ArrowLeft),  Code::ArrowLeft, modifiers)),
-        0x1b => Some((ServoKey::Named(NamedKey::Escape),     Code::Escape,    modifiers)),
-        0x20 => Some((ServoKey::Character(" ".into()),       Code::Space,     modifiers)),
-        0x7f => Some((ServoKey::Named(NamedKey::Backspace),  Code::Backspace, modifiers)),
+        0x09 => Some((ServoKey::Named(NamedKey::Tab), Code::Tab, modifiers)),
+        0x0a | 0x0d => Some((ServoKey::Named(NamedKey::Enter), Code::Enter, modifiers)),
+        0x11 => Some((ServoKey::Named(NamedKey::ArrowUp), Code::ArrowUp, modifiers)),
+        0x12 => Some((
+            ServoKey::Named(NamedKey::ArrowDown),
+            Code::ArrowDown,
+            modifiers,
+        )),
+        0x13 => Some((
+            ServoKey::Named(NamedKey::ArrowRight),
+            Code::ArrowRight,
+            modifiers,
+        )),
+        0x14 => Some((
+            ServoKey::Named(NamedKey::ArrowLeft),
+            Code::ArrowLeft,
+            modifiers,
+        )),
+        0x1b => Some((ServoKey::Named(NamedKey::Escape), Code::Escape, modifiers)),
+        0x20 => Some((ServoKey::Character(" ".into()), Code::Space, modifiers)),
+        0x7f => Some((
+            ServoKey::Named(NamedKey::Backspace),
+            Code::Backspace,
+            modifiers,
+        )),
         v if v.is_ascii() => {
             let ch = v as char;
-            Some((ServoKey::Character(ch.to_string()), character_code(ch)?, modifiers))
+            Some((
+                ServoKey::Character(ch.to_string()),
+                character_code(ch)?,
+                modifiers,
+            ))
         }
         _ => None,
     }
@@ -703,34 +849,70 @@ fn map_logical_key(key: &Key) -> Option<(ServoKey, Code, ServoModifiers)> {
 
 fn character_code(ch: char) -> Option<Code> {
     Some(match ch.to_ascii_lowercase() {
-        'a'  => Code::KeyA,  'b'  => Code::KeyB,  'c'  => Code::KeyC,
-        'd'  => Code::KeyD,  'e'  => Code::KeyE,  'f'  => Code::KeyF,
-        'g'  => Code::KeyG,  'h'  => Code::KeyH,  'i'  => Code::KeyI,
-        'j'  => Code::KeyJ,  'k'  => Code::KeyK,  'l'  => Code::KeyL,
-        'm'  => Code::KeyM,  'n'  => Code::KeyN,  'o'  => Code::KeyO,
-        'p'  => Code::KeyP,  'q'  => Code::KeyQ,  'r'  => Code::KeyR,
-        's'  => Code::KeyS,  't'  => Code::KeyT,  'u'  => Code::KeyU,
-        'v'  => Code::KeyV,  'w'  => Code::KeyW,  'x'  => Code::KeyX,
-        'y'  => Code::KeyY,  'z'  => Code::KeyZ,
-        '0'  => Code::Digit0,'1'  => Code::Digit1,'2'  => Code::Digit2,
-        '3'  => Code::Digit3,'4'  => Code::Digit4,'5'  => Code::Digit5,
-        '6'  => Code::Digit6,'7'  => Code::Digit7,'8'  => Code::Digit8,
-        '9'  => Code::Digit9,
-        '-'  => Code::Minus,       '='  => Code::Equal,
-        '['  => Code::BracketLeft, ']'  => Code::BracketRight,
-        '\\' => Code::Backslash,   ';'  => Code::Semicolon,
-        '\'' => Code::Quote,       ','  => Code::Comma,
-        '.'  => Code::Period,      '/'  => Code::Slash,
-        '`'  => Code::Backquote,
+        'a' => Code::KeyA,
+        'b' => Code::KeyB,
+        'c' => Code::KeyC,
+        'd' => Code::KeyD,
+        'e' => Code::KeyE,
+        'f' => Code::KeyF,
+        'g' => Code::KeyG,
+        'h' => Code::KeyH,
+        'i' => Code::KeyI,
+        'j' => Code::KeyJ,
+        'k' => Code::KeyK,
+        'l' => Code::KeyL,
+        'm' => Code::KeyM,
+        'n' => Code::KeyN,
+        'o' => Code::KeyO,
+        'p' => Code::KeyP,
+        'q' => Code::KeyQ,
+        'r' => Code::KeyR,
+        's' => Code::KeyS,
+        't' => Code::KeyT,
+        'u' => Code::KeyU,
+        'v' => Code::KeyV,
+        'w' => Code::KeyW,
+        'x' => Code::KeyX,
+        'y' => Code::KeyY,
+        'z' => Code::KeyZ,
+        '0' => Code::Digit0,
+        '1' => Code::Digit1,
+        '2' => Code::Digit2,
+        '3' => Code::Digit3,
+        '4' => Code::Digit4,
+        '5' => Code::Digit5,
+        '6' => Code::Digit6,
+        '7' => Code::Digit7,
+        '8' => Code::Digit8,
+        '9' => Code::Digit9,
+        '-' => Code::Minus,
+        '=' => Code::Equal,
+        '[' => Code::BracketLeft,
+        ']' => Code::BracketRight,
+        '\\' => Code::Backslash,
+        ';' => Code::Semicolon,
+        '\'' => Code::Quote,
+        ',' => Code::Comma,
+        '.' => Code::Period,
+        '/' => Code::Slash,
+        '`' => Code::Backquote,
         _ => return None,
     })
 }
 
 fn modifiers_from_key(key: &Key) -> ServoModifiers {
     let mut m = ServoModifiers::empty();
-    if key.modifiers.alt   { m |= ServoModifiers::ALT;     }
-    if key.modifiers.ctrl  { m |= ServoModifiers::CONTROL; }
-    if key.modifiers.meta  { m |= ServoModifiers::META;    }
-    if key.modifiers.shift { m |= ServoModifiers::SHIFT;   }
+    if key.modifiers.alt {
+        m |= ServoModifiers::ALT;
+    }
+    if key.modifiers.ctrl {
+        m |= ServoModifiers::CONTROL;
+    }
+    if key.modifiers.meta {
+        m |= ServoModifiers::META;
+    }
+    if key.modifiers.shift {
+        m |= ServoModifiers::SHIFT;
+    }
     m
 }

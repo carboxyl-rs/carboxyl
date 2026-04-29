@@ -8,28 +8,9 @@
 
 * Implement Standarized GitHub CI/CD/Workflow
 
-* Servo crashes under load (looks like to be a more a problem on debug builds)
+* Handle unsafe panics like SIGSEGV, SIGBUS, SIGABRT, SIGILL (on a separate module)
 
-  * Stack overflow + address boundary issues
-  * Reproduce, log, open upstream issue
-
-* Panic handling is weak
-
-  * Use `set_hook`
-  * Prevent terminal corruption
-
-* Signal handling
-
-  * Use `signal-hook` (SIGINT, SIGTERM)
-  * Route to graceful shutdown
-
-* Terminal restore (ratatui)
-
-  * Must restore on panic / signal / exit
-
-* Centralize graceful exit
-
-  * Cleanup, restore, flush logs
+* Fix Enter bug (kind of known on crossterm): enter actually types 'm' into the browser
 
 * Docker image
 
@@ -45,13 +26,7 @@
 
   * Supported protocols (Sixel / Kitty; when ready)
   * Fallback behavior
-
-* Document Servo instability
-
-  * Known crash scenarios
-  * Current limitations
-  * Link to upstream issue in Servo once created
-    
+  
 * Document Docker usage
 
 ---
