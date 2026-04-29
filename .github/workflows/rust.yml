@@ -1,0 +1,33 @@
+name: Rust
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch: 
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Build, Test, Clippy
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        toolchain: [stable]         
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Build
+      run: cargo build --verbose
+
+    - name: Run Tests
+      run: cargo test --verbose
+
+    - name: Clippy
+      run: cargo clippy
