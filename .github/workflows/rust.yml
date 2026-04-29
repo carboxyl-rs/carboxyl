@@ -3,7 +3,7 @@ name: Rust
 on:
   push:
   pull_request:
-  workflow_dispatch: 
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -11,23 +11,24 @@ env:
 jobs:
   test:
     name: Build, Test, Clippy
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        toolchain: [stable]         
+    runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-    - name: Rust Cache
-      uses: Swatinem/rust-cache@v2
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
-    - name: Build
-      run: cargo build --verbose
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
 
-    - name: Run Tests
-      run: cargo test --verbose
+      - name: Build
+        run: cargo build --verbose
 
-    - name: Clippy
-      run: cargo clippy
+      - name: Run Tests
+        run: cargo test --verbose
+
+      - name: Clippy
+        run: cargo clippy
