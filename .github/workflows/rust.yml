@@ -28,7 +28,8 @@ jobs:
             build-essential \
             pkg-config \
             libssl-dev \
-            libgl1-mesa-dev
+            libgl1-mesa-dev \
+            libfontconfig1-dev
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
