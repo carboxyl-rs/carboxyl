@@ -5,9 +5,7 @@
   * Feature detection + ANSI fallback
 
 * Text rendering using terminal native text
-
-* Implement Standarized GitHub CI/CD/Workflow
-
+* 
 * Handle unsafe panics like SIGSEGV, SIGBUS, SIGABRT, SIGILL (on a separate module)
 
 * Fix Enter bug (kind of known on crossterm): enter actually types 'm' into the browser
