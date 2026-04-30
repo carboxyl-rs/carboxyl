@@ -12,7 +12,6 @@ pub enum Event {
     MouseUp { row: u16, col: u16 },
     MouseMove { row: u16, col: u16 },
     Scroll { delta: isize },
-    TrueColorSupported,
     Exit,
 }
 

@@ -1,64 +1,71 @@
-// that should NOT handle unsafe panics!
-// let it core dump, and storngly not recommend debug builds. (maybe see if signal handling can get a code cleanup?)
-
 //! Fatal signal handling for terminal restore.
 //!
-//! Registers a handler for SIGABRT — an unrecoverable signal that bypasses
-//! Rust's panic machinery (e.g. Servo calling abort() on assertion failure).
+//! Registers a handler for [`SIGABRT`] — a signal that indicates an
+//! unrecoverable error (e.g. Servo calling `abort()` on an assertion failure)
+//! and that bypasses Rust's panic hook machinery.
 //!
-//! SIGSEGV, SIGBUS, and SIGILL are intentionally excluded: signal-hook forbids
-//! them because the process is in undefined state when they arrive. The 64MB
-//! Servo thread stack makes stack overflow essentially unreachable in practice (for release builds).
+//! The handler restores the terminal before the process dies, so the shell
+//! is not left in raw/alt-screen mode after a crash.
 //!
-//! Each handler:
-//!   1. Writes terminal restore sequences directly to stdout (async-signal-safe).
-//!   2. Calls `emulate_default_handler` which resets the disposition and
-//!      re-delivers the signal — producing the correct exit status and core dump.
+//! ## Why only SIGABRT?
 //!
-//! # Safety contract
+//! `signal-hook` explicitly forbids registering handlers for `SIGSEGV`,
+//! `SIGBUS`, and `SIGILL` because those signals indicate that the *process
+//! itself* is in an undefined state — the memory that backs your handler's
+//! stack frame may already be corrupt. There is no safe way to handle them.
+//! The 64 MB Servo thread stack makes stack overflow essentially unreachable
+//! in release builds; debug-mode crashes are accepted as-is.
 //!
-//! All `unsafe` in this module is isolated here by design. The invariants are:
+//! ## Safety
 //!
-//! - Only async-signal-safe functions are called inside the handler:
-//!     * `rustix::io::write` → thin wrapper over `write(2)`.
-//!     * `signal_hook::low_level::emulate_default_handler` → resets disposition
-//!       and re-delivers the signal atomically.
-//! - No heap allocation, no locks, no panicking.
-//! - Static byte string only — no runtime formatting.
+//! All `unsafe` in this module is isolated here by design. The invariants:
+//!
+//! - Only async-signal-safe operations are called inside the handler:
+//!   - [`rustix::io::write`] is a direct `write(2)` syscall with no
+//!     allocation, no locking, and no errno-clobbering side effects.
+//!     POSIX lists `write` as async-signal-safe (POSIX.1-2017 §2.4.3).
+//!   - [`signal_hook::low_level::emulate_default_handler`] resets the
+//!     signal disposition via `sigaction` and re-raises the signal atomically,
+//!     producing the correct exit status and core-dump behaviour.
+//! - The `RESTORE` constant is `&'static [u8]` — no heap allocation occurs.
+//! - No locks, no panicking, no formatting inside the handler.
+//! - The signal disposition is reset before re-delivery, preventing
+//!   re-entrance into this handler.
 
 use std::io;
 
-/// Escape sequences that undo ratatui's terminal initialisation:
+/// Raw escape sequences that undo ratatui's terminal initialisation:
 ///
-/// - `\x1b[?25h`   show cursor
-/// - `\x1b[?1003l` disable any-event mouse tracking
-/// - `\x1b[?1006l` disable SGR mouse encoding
-/// - `\x1b[?1049l` exit alternate screen buffer
+/// | Sequence       | Effect                          |
+/// |----------------|---------------------------------|
+/// | `\x1b[?25h`   | Show cursor (ratatui hides it)  |
+/// | `\x1b[?1003l` | Disable any-event mouse tracking |
+/// | `\x1b[?1006l` | Disable SGR mouse encoding      |
+/// | `\x1b[?1049l` | Exit alternate screen buffer    |
 const RESTORE: &[u8] = b"\x1b[?25h\x1b[?1003l\x1b[?1006l\x1b[?1049l";
 
-// SIGSEGV, SIGBUS, and SIGILL are forbidden by signal-hook — they indicate
-// undefined behaviour and signal-hook cannot safely deliver them via its
-// handler infrastructure. SIGABRT is allowed and covers Servo abort() calls.
-const FATAL_SIGNALS: &[i32] = &[signal_hook::consts::SIGABRT];
-
-/// Register terminal-restore handlers for fatal signals.
+/// Register a terminal-restore handler for [`SIGABRT`].
 ///
 /// Call once at process startup, before ratatui initialises the terminal.
+/// Safe to call multiple times — subsequent registrations stack; the most
+/// recently registered handler runs first.
+///
+/// # Errors
+///
+/// Returns an error if the OS rejects the `sigaction` call (extremely rare).
 pub fn register() -> io::Result<()> {
-    for &sig in FATAL_SIGNALS {
-        // SAFETY: see module-level safety contract.
-        unsafe {
-            signal_hook::low_level::register(sig, move || {
-                // Step 1: restore terminal — async-signal-safe write(2).
-                let _ = rustix::io::write(rustix::stdio::stdout(), RESTORE);
-
-                // Emulate the default handler — resets the disposition and
-                // re-delivers the signal in one step, avoiding the re-entry
-                // hazard of restore + raise. Produces the correct exit status
-                // and core dump behaviour.
-                let _ = signal_hook::low_level::emulate_default_handler(sig);
-            })?;
-        }
+    // SAFETY: see module-level safety contract above.
+    unsafe {
+        signal_hook::low_level::register(signal_hook::consts::SIGABRT, || {
+            // Step 1: restore terminal — direct write(2), async-signal-safe.
+            let _ = rustix::io::write(rustix::stdio::stdout(), RESTORE);
+            // Step 2: reset disposition and re-deliver with default behaviour
+            // (core dump / exit status). emulate_default_handler is atomic:
+            // it unregisters this handler before raising, preventing re-entry.
+            let _ = signal_hook::low_level::emulate_default_handler(
+                signal_hook::consts::SIGABRT,
+            );
+        })?;
     }
 
     Ok(())

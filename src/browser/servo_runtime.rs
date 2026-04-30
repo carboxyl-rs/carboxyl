@@ -67,6 +67,8 @@ enum RuntimeEvent {
     /// A fully composited frame from the Servo thread.
     Frame(BrowserFrame),
     Delegate(DelegateEvent),
+    /// Terminal was resized to (cols, rows).
+    Resize(u16, u16),
     Exit,
 }
 
@@ -224,16 +226,9 @@ fn shutdown(
     log_path: Option<PathBuf>,
 ) {
     let _ = servo_tx.try_send(ServoCommand::Shutdown);
-
-    // Give Servo up to 2s to shut down cleanly before abandoning the join.
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !servo_handle.is_finished() {
-        if Instant::now() >= deadline {
-            warn!("servo thread did not exit in time, abandoning");
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
+    // Drop the sender so the Servo thread's recv() returns Err and exits.
+    // Then join to ensure cleanup completes before we restore the terminal.
+    let _ = servo_handle.join();
 
     crossterm::execute!(io::stdout(), DisableMouseCapture).ok();
     ratatui::restore();
@@ -262,6 +257,10 @@ pub fn run(cli: Cli) -> AppResult<()> {
     let terminal = ratatui::init();
     crossterm::execute!(io::stdout(), EnableMouseCapture)?;
 
+    // Detect true-color support once at startup via crossterm.
+    // 2^24 = 16_777_216 colors means the terminal supports RGB.
+    let true_color = u32::from(crossterm::style::available_color_count()) >= (1u32 << 24);
+
     let window = Window::read(&cli);
 
     // Servo thread — owns Servo, WebView, and the rendering context.
@@ -288,7 +287,14 @@ pub fn run(cli: Cli) -> AppResult<()> {
     // Input thread — translates crossterm events.
     let _input = spawn_input_thread(event_tx.clone());
 
-    let result = event_loop(servo_tx.clone(), terminal, window, &cli, event_rx);
+    let result = event_loop(
+        servo_tx.clone(),
+        terminal,
+        window,
+        &cli,
+        true_color,
+        event_rx,
+    );
 
     shutdown(&servo_tx, servo_handle, log_path);
 
@@ -418,12 +424,12 @@ fn event_loop(
     mut terminal: DefaultTerminal,
     mut window: Window,
     cli: &Cli,
+    true_color: bool,
     event_rx: mpsc::Receiver<RuntimeEvent>,
 ) -> AppResult<()> {
     let mut pointer = BrowserPoint::default();
     let mut nav = NavState::default();
     let mut frame: Option<BrowserFrame> = None;
-    let mut true_color = false;
     let mut running = true;
     let mut pending_paint = true;
 
@@ -435,13 +441,6 @@ fn event_loop(
     const IDLE_TIMEOUT: Duration = Duration::from_millis(50);
 
     while running {
-        let next = Window::read(cli);
-        if next.differs_from(&window) {
-            let _ = servo_tx.try_send(ServoCommand::Resize(physical_size(next.browser)));
-            window = next;
-            pending_paint = true;
-        }
-
         match event_rx.recv_timeout(IDLE_TIMEOUT) {
             Ok(RuntimeEvent::Input(event)) => {
                 handle_input(
@@ -450,7 +449,6 @@ fn event_loop(
                     &window,
                     &mut nav,
                     &mut pointer,
-                    &mut true_color,
                     &mut running,
                 )?;
                 while let Ok(RuntimeEvent::Input(event)) = event_rx.try_recv() {
@@ -460,7 +458,6 @@ fn event_loop(
                         &window,
                         &mut nav,
                         &mut pointer,
-                        &mut true_color,
                         &mut running,
                     )?;
                 }
@@ -475,6 +472,15 @@ fn event_loop(
                     let _ = servo_tx.try_send(ServoCommand::Paint);
                     last_paint_cmd = Instant::now();
                 }
+            }
+
+            Ok(RuntimeEvent::Resize(cols, rows)) => {
+                let next = window.resize(cols, rows);
+                if next.differs_from(&window) {
+                    let _ = servo_tx.try_send(ServoCommand::Resize(physical_size(next.browser)));
+                    window = next;
+                }
+                pending_paint = true;
             }
 
             Ok(RuntimeEvent::Frame(f)) => {
@@ -528,13 +534,10 @@ fn handle_input(
     window: &Window,
     nav: &mut NavState,
     pointer: &mut BrowserPoint,
-    true_color: &mut bool,
     running: &mut bool,
 ) -> AppResult<()> {
     match event {
         input::Event::Exit => *running = false,
-
-        input::Event::TrueColorSupported => *true_color = true,
 
         input::Event::Scroll { delta } => {
             let ev = InputEvent::Wheel(WheelEvent::new(
@@ -679,6 +682,9 @@ fn spawn_input_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHandle<
                 Err(e) => {
                     error!("crossterm read: {e}");
                     break;
+                }
+                Ok(crossterm::event::Event::Resize(cols, rows)) => {
+                    let _ = tx.try_send(RuntimeEvent::Resize(cols, rows));
                 }
                 Ok(ev) => {
                     for event in map_crossterm_event(ev) {
