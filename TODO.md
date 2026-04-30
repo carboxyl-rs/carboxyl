@@ -1,8 +1,5 @@
 # TODO
 
-
-* Fix Enter bug (kind of known on crossterm): enter actually types 'm' into the browser
-
 * Handle unsafe panics like SIGSEGV, SIGBUS, SIGABRT, SIGILL (on a separate module)
 
 * Text rendering using terminal native text

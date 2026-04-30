@@ -45,30 +45,6 @@ impl KeyMods {
     }
 }
 
-/// Returns true if this crossterm event is a mouse event. Used to detect
-/// the SGR 'm'/'M' terminator leak bug (see `is_sgr_artifact` below).
-pub fn is_mouse_event(event: &CrosstermEvent) -> bool {
-    matches!(event, CrosstermEvent::Mouse(_))
-}
-
-/// In SGR mouse mode, mouse release events are terminated with a lowercase
-/// 'm' and press events with uppercase 'M'. If crossterm reads a mouse event
-/// and a key event from the same buffer, the 'm'/'M' terminator can leak
-/// through as a spurious `KeyCode::Char('m'/'M')` with no modifiers.
-///
-/// This is a known crossterm bug. We suppress the artifact when it
-/// immediately follows a mouse event in the same read cycle.
-pub fn is_sgr_artifact(event: &CrosstermEvent) -> bool {
-    matches!(
-        event,
-        CrosstermEvent::Key(KeyEvent {
-            code: KeyCode::Char('m') | KeyCode::Char('M'),
-            modifiers: KeyModifiers::NONE,
-            ..
-        })
-    )
-}
-
 /// Translate a crossterm `KeyEvent` into our `Key`, returning `None` for
 /// keys we don't handle (function keys, media keys, etc.).
 pub fn map_key_event(event: KeyEvent) -> Option<Key> {

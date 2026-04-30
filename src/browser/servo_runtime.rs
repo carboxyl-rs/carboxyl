@@ -27,7 +27,7 @@ use simplelog::{Config, LevelFilter, WriteLogger};
 use url::Url;
 
 use crate::cli::Cli;
-use crate::input::{self, Key, is_mouse_event, is_sgr_artifact, map_crossterm_event};
+use crate::input::{self, Key, map_crossterm_event};
 use crate::output::{BrowserFrame, BrowserWidget, NavAction, NavState, NavWidget, Window};
 
 pub type AppResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -551,9 +551,14 @@ fn handle_input(
 
         input::Event::KeyPress(key) => {
             let action = nav.keypress(key.char, key.modifiers.alt, key.modifiers.meta);
+            let forward = matches!(action, NavAction::Forward);
             dispatch_nav(action, servo_tx)?;
 
-            if let Some((down, up)) = map_keyboard_event(&key) {
+            // Only forward keyboard events to Servo when the nav bar did not
+            // consume them. GoTo/GoBack/Refresh/Ignore are all handled by us —
+            // sending them on to Servo too causes double-handling (e.g. Enter
+            // submitting a nav action AND inserting into a focused page element).
+            if forward && let Some((down, up)) = map_keyboard_event(&key) {
                 let _ = servo_tx.try_send(ServoCommand::Input(InputEvent::Keyboard(down)));
                 let _ = servo_tx.try_send(ServoCommand::Input(InputEvent::Keyboard(up)));
             }
@@ -655,10 +660,6 @@ fn draw_frame(
 
 fn spawn_input_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        // Track whether the previous crossterm event was a mouse event so we
-        // can suppress the SGR 'm'/'M' terminator artifact on the next read.
-        let mut last_was_mouse = false;
-
         loop {
             match ct_poll(Duration::from_millis(100)) {
                 Err(e) => {
@@ -680,16 +681,6 @@ fn spawn_input_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHandle<
                     break;
                 }
                 Ok(ev) => {
-                    // Suppress the spurious 'm'/'M' keypress that crossterm
-                    // emits when an SGR mouse release event and a keypress
-                    // arrive in the same read buffer.
-                    if last_was_mouse && is_sgr_artifact(&ev) {
-                        last_was_mouse = false;
-                        continue;
-                    }
-
-                    last_was_mouse = is_mouse_event(&ev);
-
                     for event in map_crossterm_event(ev) {
                         let is_exit = matches!(event, input::Event::Exit);
                         let _ = tx.try_send(RuntimeEvent::Input(event));
@@ -798,6 +789,33 @@ fn map_keyboard_event(key: &Key) -> Option<(ServoKeyboardEvent, ServoKeyboardEve
 }
 
 fn map_logical_key(key: &Key) -> Option<(ServoKey, Code, ServoModifiers)> {
+    // Named keys must be matched on key.char *before* the Ctrl+letter
+    // remapping (0x01..=0x1a → letter + CONTROL), because several named
+    // keys live in that range:
+    //   0x09 = Tab, 0x0d = Enter (Ctrl+M), 0x1b = Escape (Ctrl+[), etc.
+    // Without this, Enter would become ServoKey::Character("m") + CONTROL,
+    // causing Servo to insert 'm' into focused input fields.
+    let empty = ServoModifiers::empty();
+    match key.char {
+        0x09 => return Some((ServoKey::Named(NamedKey::Tab), Code::Tab, empty)),
+        0x0a | 0x0d => return Some((ServoKey::Named(NamedKey::Enter), Code::Enter, empty)),
+        // Arrow keys use custom codes set by our input module (0x11-0x14).
+        0x11 => return Some((ServoKey::Named(NamedKey::ArrowUp), Code::ArrowUp, empty)),
+        0x12 => return Some((ServoKey::Named(NamedKey::ArrowDown), Code::ArrowDown, empty)),
+        0x13 => {
+            return Some((
+                ServoKey::Named(NamedKey::ArrowRight),
+                Code::ArrowRight,
+                empty,
+            ));
+        }
+        0x14 => return Some((ServoKey::Named(NamedKey::ArrowLeft), Code::ArrowLeft, empty)),
+        0x1b => return Some((ServoKey::Named(NamedKey::Escape), Code::Escape, empty)),
+        0x7f => return Some((ServoKey::Named(NamedKey::Backspace), Code::Backspace, empty)),
+        _ => {}
+    }
+
+    // Remaining control characters (Ctrl+A–Z, excluding the named keys above).
     let (char_code, forced_ctrl) = match key.char {
         0x01..=0x1a => (key.char + b'a' - 1, true),
         v => (v, false),
@@ -806,35 +824,11 @@ fn map_logical_key(key: &Key) -> Option<(ServoKey, Code, ServoModifiers)> {
     let modifiers = if forced_ctrl {
         ServoModifiers::CONTROL
     } else {
-        ServoModifiers::empty()
+        empty
     };
 
     match char_code {
-        0x09 => Some((ServoKey::Named(NamedKey::Tab), Code::Tab, modifiers)),
-        0x0a | 0x0d => Some((ServoKey::Named(NamedKey::Enter), Code::Enter, modifiers)),
-        0x11 => Some((ServoKey::Named(NamedKey::ArrowUp), Code::ArrowUp, modifiers)),
-        0x12 => Some((
-            ServoKey::Named(NamedKey::ArrowDown),
-            Code::ArrowDown,
-            modifiers,
-        )),
-        0x13 => Some((
-            ServoKey::Named(NamedKey::ArrowRight),
-            Code::ArrowRight,
-            modifiers,
-        )),
-        0x14 => Some((
-            ServoKey::Named(NamedKey::ArrowLeft),
-            Code::ArrowLeft,
-            modifiers,
-        )),
-        0x1b => Some((ServoKey::Named(NamedKey::Escape), Code::Escape, modifiers)),
         0x20 => Some((ServoKey::Character(" ".into()), Code::Space, modifiers)),
-        0x7f => Some((
-            ServoKey::Named(NamedKey::Backspace),
-            Code::Backspace,
-            modifiers,
-        )),
         v if v.is_ascii() => {
             let ch = v as char;
             Some((
