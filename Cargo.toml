@@ -17,3 +17,10 @@ log = "0.4"
 simplelog = "0.12"
 glam = "0.32"
 signal-hook = "0.4"
+
+# release optimizations: cool but build times increase a lot
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
