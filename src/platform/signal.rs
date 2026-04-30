@@ -1,3 +1,6 @@
+// that should NOT handle unsafe panics!
+// let it core dump, and storngly not recommend debug builds. (maybe see if signal handling can get a code cleanup?)
+
 //! Fatal signal handling for terminal restore.
 //!
 //! Registers a handler for SIGABRT — an unrecoverable signal that bypasses
@@ -5,7 +8,7 @@
 //!
 //! SIGSEGV, SIGBUS, and SIGILL are intentionally excluded: signal-hook forbids
 //! them because the process is in undefined state when they arrive. The 64MB
-//! Servo thread stack makes stack overflow essentially unreachable in practice.
+//! Servo thread stack makes stack overflow essentially unreachable in practice (for release builds).
 //!
 //! Each handler:
 //!   1. Writes terminal restore sequences directly to stdout (async-signal-safe).

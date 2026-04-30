@@ -1,14 +1,12 @@
 # TODO
 
-* Handle unsafe panics like SIGSEGV, SIGBUS, SIGABRT, SIGILL (on a separate module)
-
-* Text rendering using terminal native text
-
 * Docker image
 
   * Create reproducible build environment
   * Optimize image size (multi-stage build)
   * Ensure proper terminal support inside container
+
+* Text rendering using terminal native text
 
 * A fancy browser ui (as ratatui is already implemented)
 
@@ -19,6 +17,8 @@
 ---
 
 # Docs / README Improvements
+
+* Release builds by default always!
 
 * Document terminal graphics support
 
