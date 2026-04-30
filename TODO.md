@@ -8,6 +8,8 @@
 
 * Text rendering using terminal native text
 
+* Main keys are working but it'd be better if everything were sent to servo; like ctrl-letter, shift, etc.
+
 * A fancy browser ui (as ratatui is already implemented)
 
 * Optional hi-res terminal graphics (Sixel / Kitty)
@@ -18,13 +20,11 @@
 
 # Docs / README Improvements
 
-* Release builds by default always!
-
-* Document terminal graphics support
+* Document terminal graphics support (when added)
 
   * Supported protocols (Sixel / Kitty; when ready)
   * Fallback behavior
   
-* Document Docker usage
+* Document Docker usage (when added)
 
 ---
