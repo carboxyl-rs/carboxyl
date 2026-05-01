@@ -19,7 +19,7 @@ glam = "0.32"
 signal-hook = "0.4"
 # serde_json = "1" # unused yet!
 
-# release optimizations: cool but build times increase a lot
+# release optimizations: default for builds
 [profile.release]
 strip = true
 lto = true

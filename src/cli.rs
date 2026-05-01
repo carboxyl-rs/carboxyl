@@ -10,10 +10,10 @@ pub struct Cli {
     /// URL to open
     pub url: Option<String>,
 
-    /// Maximum frames per second.
+    /// Framerate. Maximum frames per second.
     /// Lower values reduce terminal rendering overhead and can make
-    /// page interaction feel smoother under load. 24fps is recommended.
-    #[arg(short = 'f', long = "fps", default_value_t = 24)]
+    /// page interaction feel smoother under load.
+    #[arg(short = 'f', long = "fps", default_value_t = 60)]
     pub fps: u32,
 
     /// Rendering resolution: pixels rendered per terminal cell.
