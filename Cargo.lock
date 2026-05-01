@@ -727,7 +727,6 @@ dependencies = [
  "ratatui",
  "rustix",
  "rustls",
- "serde_json",
  "servo",
  "signal-hook 0.4.4",
  "simplelog",
