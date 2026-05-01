@@ -1,11 +1,5 @@
 # TODO
 
-* Docker image
-
-  * Create reproducible build environment
-  * Optimize image size (multi-stage build)
-  * Ensure proper terminal support inside container
-
 * Text rendering using terminal native text (IN PROGRESS)
 
   * Try not using servo to render space with text but rendering terminal text instead;
@@ -20,15 +14,4 @@
 
   * Feature detection + ANSI fallback
   
----
-
-# Docs / README Improvements
-
-* Document terminal graphics support (when added)
-
-  * Supported protocols (Sixel / Kitty; when ready)
-  * Fallback behavior
-  
-* Document Docker usage (when added)
-
 ---
