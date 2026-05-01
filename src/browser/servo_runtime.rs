@@ -15,11 +15,11 @@ use ratatui::{DefaultTerminal, Frame};
 use rustls::crypto::CryptoProvider;
 use servo::{
     AuthenticationRequest, Code, DeviceIntPoint, DeviceIntRect, DeviceIntSize, DevicePoint,
-    EventLoopWaker, InputEvent, Key as ServoKey, KeyState, KeyboardEvent as ServoKeyboardEvent,
-    LoadStatus, Location, Modifiers as ServoModifiers, MouseButton, MouseButtonAction,
-    MouseButtonEvent, MouseMoveEvent, NamedKey, Preferences, RenderingContext, ServoBuilder,
-    ServoDelegate, ServoError, SoftwareRenderingContext, WebView, WebViewBuilder, WebViewDelegate,
-    WebViewPoint, WheelDelta, WheelEvent, WheelMode,
+    EventLoopWaker, InputEvent, JavaScriptEvaluationError, Key as ServoKey, KeyState,
+    KeyboardEvent as ServoKeyboardEvent, LoadStatus, Location, Modifiers as ServoModifiers,
+    MouseButton, MouseButtonAction, MouseButtonEvent, MouseMoveEvent, NamedKey, Preferences,
+    RenderingContext, ServoBuilder, ServoDelegate, ServoError, SoftwareRenderingContext, WebView,
+    WebViewBuilder, WebViewDelegate, WebViewPoint, WheelDelta, WheelEvent, WheelMode,
 };
 use signal_hook::consts::{SIGINT, SIGPIPE, SIGTERM};
 use signal_hook::iterator::Signals;
@@ -28,7 +28,10 @@ use url::Url;
 
 use crate::cli::Cli;
 use crate::input::{self, Key, map_crossterm_event};
-use crate::output::{BrowserFrame, BrowserWidget, NavAction, NavState, NavWidget, Window};
+use crate::output::{
+    BrowserFrame, BrowserWidget, EXTRACTION_SCRIPT, NavAction, NavState, NavWidget, TextNode,
+    TextOverlay, Window, parse_js_nodes,
+};
 
 pub type AppResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -69,6 +72,8 @@ enum RuntimeEvent {
     Delegate(DelegateEvent),
     /// Terminal was resized to (cols, rows).
     Resize(u16, u16),
+    /// Text nodes extracted from the page via JS.
+    TextNodes(Vec<TextNode>),
     Exit,
 }
 
@@ -93,6 +98,8 @@ enum ServoCommand {
     Input(InputEvent),
     /// Composite and send back a frame if anything changed.
     Paint,
+    /// Run the text extraction script and send results back.
+    ExtractText,
     Shutdown,
 }
 
@@ -343,6 +350,7 @@ fn servo_thread(
 
     while let Ok(cmd) = servo_rx.recv() {
         let mut should_paint = false;
+        let mut should_extract = false;
         let mut new_size: Option<PhysicalSize<u32>> = None;
         let mut shutdown = false;
 
@@ -365,6 +373,7 @@ fn servo_thread(
                 webview.notify_input_event(ev);
             }
             ServoCommand::Paint => should_paint = true,
+            ServoCommand::ExtractText => should_extract = true,
         };
 
         handle(cmd);
@@ -386,6 +395,10 @@ fn servo_thread(
 
         servo.spin_event_loop();
 
+        if should_extract {
+            extract_text(&webview, event_tx.clone());
+        }
+
         if should_paint && let Some(frame) = paint(&webview, rendering_context.as_ref()) {
             let _ = event_tx.try_send(RuntimeEvent::Frame(frame));
         }
@@ -394,6 +407,27 @@ fn servo_thread(
         // preventing Servo's workers from starving them under heavy load.
         thread::sleep(Duration::from_millis(1));
     }
+}
+
+/// Evaluate the text extraction script on the current page and forward
+/// the results back to the main loop as `RuntimeEvent::TextNodes`.
+fn extract_text(webview: &WebView, event_tx: mpsc::SyncSender<RuntimeEvent>) {
+    webview.evaluate_javascript(EXTRACTION_SCRIPT, move |result| {
+        match result {
+            Ok(value) => {
+                let nodes = parse_js_nodes(&value);
+                if !nodes.is_empty() {
+                    let _ = event_tx.try_send(RuntimeEvent::TextNodes(nodes));
+                }
+            }
+            Err(e) => {
+                // WebViewNotReady is expected during load — silently ignore.
+                if !matches!(e, JavaScriptEvaluationError::WebViewNotReady) {
+                    warn!("text extraction failed: {e:?}");
+                }
+            }
+        }
+    });
 }
 
 fn paint(webview: &WebView, ctx: &dyn RenderingContext) -> Option<BrowserFrame> {
@@ -432,11 +466,16 @@ fn event_loop(
     let mut frame: Option<BrowserFrame> = None;
     let mut running = true;
     let mut pending_paint = true;
+    let native_text = !cli.no_native_text;
 
     let frame_budget = Duration::from_millis(1000 / cli.fps.max(1) as u64);
     let mut last_draw = Instant::now() - frame_budget;
     // Rate-limit Paint commands sent to Servo to match the fps cap.
     let mut last_paint_cmd = Instant::now() - frame_budget;
+    // Debounce text extraction: only re-extract after 300ms of inactivity.
+    let extract_debounce = Duration::from_millis(300);
+    let mut last_extract = Instant::now() - extract_debounce;
+    let mut text_nodes: Vec<TextNode> = Vec::new();
 
     const IDLE_TIMEOUT: Duration = Duration::from_millis(50);
 
@@ -465,12 +504,15 @@ fn event_loop(
             }
 
             Ok(RuntimeEvent::Wake) => {
-                // Rate-limit: only forward a Paint command if the frame budget
-                // has elapsed since the last one. This prevents the Servo thread
-                // from being flooded with Paint requests on heavy pages.
+                // Rate-limit paint to fps cap.
                 if last_paint_cmd.elapsed() >= frame_budget {
                     let _ = servo_tx.try_send(ServoCommand::Paint);
                     last_paint_cmd = Instant::now();
+                }
+                // Debounced text extraction covers SPA navigation and scroll.
+                if native_text && last_extract.elapsed() >= extract_debounce {
+                    let _ = servo_tx.try_send(ServoCommand::ExtractText);
+                    last_extract = Instant::now();
                 }
             }
 
@@ -479,6 +521,11 @@ fn event_loop(
                 if next.differs_from(&window) {
                     let _ = servo_tx.try_send(ServoCommand::Resize(physical_size(next.browser)));
                     window = next;
+                }
+                // Re-extract text after resize since positions change.
+                if native_text && last_extract.elapsed() >= extract_debounce {
+                    let _ = servo_tx.try_send(ServoCommand::ExtractText);
+                    last_extract = Instant::now();
                 }
                 pending_paint = true;
             }
@@ -492,6 +539,8 @@ fn event_loop(
                 match ev {
                     DelegateEvent::UrlChanged(url) => {
                         nav.push(&url, nav.can_go_back, nav.can_go_forward);
+                        // URL changed — schedule text extraction after the page settles.
+                        last_extract = Instant::now() - extract_debounce;
                     }
                     DelegateEvent::TitleChanged(title) => {
                         let _ = write!(io::stdout(), "\x1b]0;{title}\x07");
@@ -509,6 +558,13 @@ fn event_loop(
                 pending_paint = true;
             }
 
+            Ok(RuntimeEvent::TextNodes(nodes)) => {
+                if native_text {
+                    text_nodes = nodes;
+                    pending_paint = true;
+                }
+            }
+
             Ok(RuntimeEvent::Exit) => running = false,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -517,7 +573,15 @@ fn event_loop(
         if pending_paint && last_draw.elapsed() >= frame_budget {
             pending_paint = false;
             last_draw = Instant::now();
-            draw_frame(&mut terminal, &nav, frame.as_ref(), true_color)?;
+            draw_frame(
+                &mut terminal,
+                &nav,
+                frame.as_ref(),
+                &text_nodes,
+                &window,
+                true_color,
+                native_text,
+            )?;
         }
     }
 
@@ -637,7 +701,10 @@ fn draw_frame(
     terminal: &mut DefaultTerminal,
     nav: &NavState,
     frame: Option<&BrowserFrame>,
+    text_nodes: &[TextNode],
+    window: &Window,
     true_color: bool,
+    native_text: bool,
 ) -> AppResult<()> {
     terminal.draw(|f: &mut Frame| {
         let [nav_area, browser_area] =
@@ -646,7 +713,17 @@ fn draw_frame(
         f.render_widget(NavWidget::new(nav), nav_area);
 
         if let Some(frame) = frame {
+            // Layer 1: pixel render.
             f.render_widget(BrowserWidget::new(frame, true_color), browser_area);
+
+            // Layer 2: native text overlay on top of pixels.
+            if native_text && !text_nodes.is_empty() {
+                let pixels = Some((frame.pixels.as_slice(), frame.size.x, frame.size.y));
+                f.render_widget(
+                    TextOverlay::new(text_nodes, window.cell_pixels, pixels, true_color),
+                    browser_area,
+                );
+            }
         }
 
         if let Some(pos) = NavWidget::new(nav).cursor_position(nav_area) {
