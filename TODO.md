@@ -8,7 +8,7 @@
   * '--no-native-text' is not being completely respected: shouldn't suppress text when enabled
   * Some texts are rendered even if they aren't on top
   * In some (relatively rare) cases the rendered text comes with a .thing{css} stuff in it
-  * Check if all texts are being rendered
+  * Not all kinds of text are being rendered (specific ones)
 
 * Main keys are working but it'd be better if every single key were sent to servo; like (ctrl, shift) alone and combinations
 
