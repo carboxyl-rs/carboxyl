@@ -29,8 +29,8 @@ use url::Url;
 use crate::cli::Cli;
 use crate::input::{self, Key, map_crossterm_event};
 use crate::output::{
-    BrowserFrame, BrowserWidget, EXTRACTION_SCRIPT, NavAction, NavState, NavWidget, TextNode,
-    TextOverlay, Window, parse_js_nodes,
+    BrowserFrame, BrowserWidget, EXTRACTION_SCRIPT, NavAction, NavState, NavWidget,
+    SUPPRESS_TEXT_SCRIPT, TextNode, TextOverlay, Window, parse_js_nodes,
 };
 
 pub type AppResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -74,6 +74,9 @@ enum RuntimeEvent {
     Resize(u16, u16),
     /// Text nodes extracted from the page via JS.
     TextNodes(Vec<TextNode>),
+    /// Fired by the delegate after load-complete; causes an immediate extract
+    /// (bypassing the debounce) so native text appears as soon as the page settles.
+    TextExtractRequested,
     Exit,
 }
 
@@ -100,6 +103,8 @@ enum ServoCommand {
     Paint,
     /// Run the text extraction script and send results back.
     ExtractText,
+    /// Inject the text-suppression stylesheet into the current page.
+    SuppressText,
     Shutdown,
 }
 
@@ -128,6 +133,7 @@ impl EventLoopWaker for ServoWaker {
 
 struct TerminalWebViewDelegate {
     event_tx: mpsc::SyncSender<RuntimeEvent>,
+    servo_tx: mpsc::SyncSender<ServoCommand>,
 }
 
 impl WebViewDelegate for TerminalWebViewDelegate {
@@ -187,7 +193,16 @@ impl WebViewDelegate for TerminalWebViewDelegate {
         );
     }
 
-    fn notify_load_status_changed(&self, _: WebView, _: LoadStatus) {}
+    fn notify_load_status_changed(&self, _: WebView, status: LoadStatus) {
+        if matches!(status, LoadStatus::Complete) {
+            // Suppress first so Servo repaints with transparent text, then
+            // schedule extraction so the overlay is populated once settled.
+            // SuppressText enters servo_rx before TextExtractRequested reaches
+            // the main loop, so ordering is guaranteed.
+            let _ = self.servo_tx.try_send(ServoCommand::SuppressText);
+            let _ = self.event_tx.try_send(RuntimeEvent::TextExtractRequested);
+        }
+    }
 }
 
 struct TerminalServoDelegate;
@@ -221,10 +236,6 @@ fn init_logger(debug: bool) -> io::Result<Option<PathBuf>> {
 
 // ---------------------------------------------------------------------------
 // Graceful shutdown
-//
-// Called from the normal exit path. The panic hook in main.rs calls
-// ratatui::restore() independently because at panic time the terminal handle
-// may already be gone.
 // ---------------------------------------------------------------------------
 
 fn shutdown(
@@ -233,8 +244,6 @@ fn shutdown(
     log_path: Option<PathBuf>,
 ) {
     let _ = servo_tx.try_send(ServoCommand::Shutdown);
-    // Drop the sender so the Servo thread's recv() returns Err and exits.
-    // Then join to ensure cleanup completes before we restore the terminal.
     let _ = servo_handle.join();
 
     crossterm::execute!(io::stdout(), DisableMouseCapture).ok();
@@ -264,21 +273,16 @@ pub fn run(cli: Cli) -> AppResult<()> {
     let terminal = ratatui::init();
     crossterm::execute!(io::stdout(), EnableMouseCapture)?;
 
-    // Detect true-color support once at startup via crossterm.
-    // 2^24 = 16_777_216 colors means the terminal supports RGB.
     let true_color = u32::from(crossterm::style::available_color_count()) >= (1u32 << 24);
 
     let window = Window::read(&cli);
 
-    // Servo thread — owns Servo, WebView, and the rendering context.
     let servo_handle = {
         let event_tx = event_tx.clone();
         let servo_tx_waker = servo_tx.clone();
         let url = normalize_url(cli.url.clone())?;
         let browser_size = physical_size(window.browser);
 
-        // Servo's style system recurses deeply, especially in debug builds.
-        // A 64MB stack prevents stack overflows on complex pages.
         thread::Builder::new()
             .name("servo".to_owned())
             .stack_size(64 * 1024 * 1024)
@@ -288,10 +292,7 @@ pub fn run(cli: Cli) -> AppResult<()> {
             .expect("failed to spawn servo thread")
     };
 
-    // Signal thread — routes SIGINT/SIGTERM/SIGPIPE to RuntimeEvent::Exit.
     let _signal = spawn_signal_thread(event_tx.clone());
-
-    // Input thread — translates crossterm events.
     let _input = spawn_input_thread(event_tx.clone());
 
     let result = event_loop(
@@ -321,7 +322,9 @@ fn servo_thread(
 ) {
     let servo = ServoBuilder::default()
         .preferences(browser_preferences(Preferences::default()))
-        .event_loop_waker(Box::new(ServoWaker { tx: servo_tx }))
+        .event_loop_waker(Box::new(ServoWaker {
+            tx: servo_tx.clone(),
+        }))
         .build();
 
     servo.set_delegate(Rc::new(TerminalServoDelegate));
@@ -338,6 +341,7 @@ fn servo_thread(
 
     let delegate: Rc<dyn WebViewDelegate> = Rc::new(TerminalWebViewDelegate {
         event_tx: event_tx.clone(),
+        servo_tx: servo_tx.clone(),
     });
 
     let webview = WebViewBuilder::new(&servo, rendering_context.clone())
@@ -351,6 +355,7 @@ fn servo_thread(
     while let Ok(cmd) = servo_rx.recv() {
         let mut should_paint = false;
         let mut should_extract = false;
+        let mut should_suppress = false;
         let mut new_size: Option<PhysicalSize<u32>> = None;
         let mut shutdown = false;
 
@@ -374,11 +379,11 @@ fn servo_thread(
             }
             ServoCommand::Paint => should_paint = true,
             ServoCommand::ExtractText => should_extract = true,
+            ServoCommand::SuppressText => should_suppress = true,
         };
 
         handle(cmd);
 
-        // Drain all pending commands before spinning.
         while let Ok(cmd) = servo_rx.try_recv() {
             handle(cmd);
         }
@@ -395,6 +400,12 @@ fn servo_thread(
 
         servo.spin_event_loop();
 
+        // Suppress first so Servo repaints with transparent text before we
+        // extract node positions — guarantees the two are always paired.
+        if should_suppress {
+            suppress_text(&webview);
+        }
+
         if should_extract {
             extract_text(&webview, event_tx.clone());
         }
@@ -403,28 +414,34 @@ fn servo_thread(
             let _ = event_tx.try_send(RuntimeEvent::Frame(frame));
         }
 
-        // Yield briefly so the OS can schedule the input and main threads,
-        // preventing Servo's workers from starving them under heavy load.
         thread::sleep(Duration::from_millis(1));
     }
+}
+
+/// Inject the text-suppression stylesheet into the current page.
+fn suppress_text(webview: &WebView) {
+    webview.evaluate_javascript(SUPPRESS_TEXT_SCRIPT, |result| {
+        if let Err(e) = result
+            && !matches!(e, JavaScriptEvaluationError::WebViewNotReady)
+        {
+            warn!("text suppression failed: {e:?}");
+        }
+    });
 }
 
 /// Evaluate the text extraction script on the current page and forward
 /// the results back to the main loop as `RuntimeEvent::TextNodes`.
 fn extract_text(webview: &WebView, event_tx: mpsc::SyncSender<RuntimeEvent>) {
-    webview.evaluate_javascript(EXTRACTION_SCRIPT, move |result| {
-        match result {
-            Ok(value) => {
-                let nodes = parse_js_nodes(&value);
-                if !nodes.is_empty() {
-                    let _ = event_tx.try_send(RuntimeEvent::TextNodes(nodes));
-                }
+    webview.evaluate_javascript(EXTRACTION_SCRIPT, move |result| match result {
+        Ok(value) => {
+            let nodes = parse_js_nodes(&value);
+            if !nodes.is_empty() {
+                let _ = event_tx.try_send(RuntimeEvent::TextNodes(nodes));
             }
-            Err(e) => {
-                // WebViewNotReady is expected during load — silently ignore.
-                if !matches!(e, JavaScriptEvaluationError::WebViewNotReady) {
-                    warn!("text extraction failed: {e:?}");
-                }
+        }
+        Err(e) => {
+            if !matches!(e, JavaScriptEvaluationError::WebViewNotReady) {
+                warn!("text extraction failed: {e:?}");
             }
         }
     });
@@ -470,9 +487,7 @@ fn event_loop(
 
     let frame_budget = Duration::from_millis(1000 / cli.fps.max(1) as u64);
     let mut last_draw = Instant::now() - frame_budget;
-    // Rate-limit Paint commands sent to Servo to match the fps cap.
     let mut last_paint_cmd = Instant::now() - frame_budget;
-    // Debounce text extraction: only re-extract after 300ms of inactivity.
     let extract_debounce = Duration::from_millis(300);
     let mut last_extract = Instant::now() - extract_debounce;
     let mut text_nodes: Vec<TextNode> = Vec::new();
@@ -504,12 +519,10 @@ fn event_loop(
             }
 
             Ok(RuntimeEvent::Wake) => {
-                // Rate-limit paint to fps cap.
                 if last_paint_cmd.elapsed() >= frame_budget {
                     let _ = servo_tx.try_send(ServoCommand::Paint);
                     last_paint_cmd = Instant::now();
                 }
-                // Debounced text extraction covers SPA navigation and scroll.
                 if native_text && last_extract.elapsed() >= extract_debounce {
                     let _ = servo_tx.try_send(ServoCommand::ExtractText);
                     last_extract = Instant::now();
@@ -522,7 +535,6 @@ fn event_loop(
                     let _ = servo_tx.try_send(ServoCommand::Resize(physical_size(next.browser)));
                     window = next;
                 }
-                // Re-extract text after resize since positions change.
                 if native_text && last_extract.elapsed() >= extract_debounce {
                     let _ = servo_tx.try_send(ServoCommand::ExtractText);
                     last_extract = Instant::now();
@@ -539,7 +551,6 @@ fn event_loop(
                 match ev {
                     DelegateEvent::UrlChanged(url) => {
                         nav.push(&url, nav.can_go_back, nav.can_go_forward);
-                        // URL changed — schedule text extraction after the page settles.
                         last_extract = Instant::now() - extract_debounce;
                     }
                     DelegateEvent::TitleChanged(title) => {
@@ -562,6 +573,16 @@ fn event_loop(
                 if native_text {
                     text_nodes = nodes;
                     pending_paint = true;
+                }
+            }
+
+            // Load-complete fired by the delegate: extract immediately,
+            // bypassing the debounce. SuppressText was already enqueued into
+            // servo_rx by the delegate before this event arrived here.
+            Ok(RuntimeEvent::TextExtractRequested) => {
+                if native_text {
+                    let _ = servo_tx.try_send(ServoCommand::ExtractText);
+                    last_extract = Instant::now();
                 }
             }
 
@@ -621,10 +642,6 @@ fn handle_input(
             let forward = matches!(action, NavAction::Forward);
             dispatch_nav(action, servo_tx)?;
 
-            // Only forward keyboard events to Servo when the nav bar did not
-            // consume them. GoTo/GoBack/Refresh/Ignore are all handled by us —
-            // sending them on to Servo too causes double-handling (e.g. Enter
-            // submitting a nav action AND inserting into a focused page element).
             if forward && let Some((down, up)) = map_keyboard_event(&key) {
                 let _ = servo_tx.try_send(ServoCommand::Input(InputEvent::Keyboard(down)));
                 let _ = servo_tx.try_send(ServoCommand::Input(InputEvent::Keyboard(up)));
@@ -713,10 +730,8 @@ fn draw_frame(
         f.render_widget(NavWidget::new(nav), nav_area);
 
         if let Some(frame) = frame {
-            // Layer 1: pixel render.
             f.render_widget(BrowserWidget::new(frame, true_color), browser_area);
 
-            // Layer 2: native text overlay on top of pixels.
             if native_text && !text_nodes.is_empty() {
                 let pixels = Some((frame.pixels.as_slice(), frame.size.x, frame.size.y));
                 f.render_widget(
@@ -785,11 +800,6 @@ fn spawn_input_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHandle<
 
 fn spawn_signal_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        // SIGINT/SIGTERM/SIGPIPE are safe to intercept via the iterator.
-        // SIGSEGV/SIGBUS (stack overflow) are fatal signals that require
-        // unsafe signal handlers — we don't handle those here. Release builds
-        // don't stack overflow, and the global panic hook in main.rs covers
-        // Rust panics. For debug-mode crashes, terminal corruption is accepted.
         let mut signals = match Signals::new([SIGINT, SIGTERM, SIGPIPE]) {
             Ok(s) => s,
             Err(e) => {
@@ -872,17 +882,10 @@ fn map_keyboard_event(key: &Key) -> Option<(ServoKeyboardEvent, ServoKeyboardEve
 }
 
 fn map_logical_key(key: &Key) -> Option<(ServoKey, Code, ServoModifiers)> {
-    // Named keys must be matched on key.char *before* the Ctrl+letter
-    // remapping (0x01..=0x1a → letter + CONTROL), because several named
-    // keys live in that range:
-    //   0x09 = Tab, 0x0d = Enter (Ctrl+M), 0x1b = Escape (Ctrl+[), etc.
-    // Without this, Enter would become ServoKey::Character("m") + CONTROL,
-    // causing Servo to insert 'm' into focused input fields.
     let empty = ServoModifiers::empty();
     match key.char {
         0x09 => return Some((ServoKey::Named(NamedKey::Tab), Code::Tab, empty)),
         0x0a | 0x0d => return Some((ServoKey::Named(NamedKey::Enter), Code::Enter, empty)),
-        // Arrow keys use custom codes set by our input module (0x11-0x14).
         0x11 => return Some((ServoKey::Named(NamedKey::ArrowUp), Code::ArrowUp, empty)),
         0x12 => return Some((ServoKey::Named(NamedKey::ArrowDown), Code::ArrowDown, empty)),
         0x13 => {
@@ -898,7 +901,6 @@ fn map_logical_key(key: &Key) -> Option<(ServoKey, Code, ServoModifiers)> {
         _ => {}
     }
 
-    // Remaining control characters (Ctrl+A–Z, excluding the named keys above).
     let (char_code, forced_ctrl) = match key.char {
         0x01..=0x1a => (key.char + b'a' - 1, true),
         v => (v, false),

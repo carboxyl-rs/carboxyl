@@ -97,6 +97,9 @@ fn f32_field(map: &std::collections::HashMap<String, JSValue>, key: &str) -> Opt
 }
 
 /// Parse CSS `rgb(r, g, b)` or `rgba(r, g, b, a)`.
+/// After text suppression, computed color will be `rgba(r, g, b, 0)` —
+/// the RGB channels still carry the original color, so we read them as-is
+/// and discard the alpha component entirely.
 fn parse_css_color(s: &str) -> Option<Color> {
     let inner = s
         .trim()
@@ -147,12 +150,11 @@ impl<'a> TextOverlay<'a> {
 impl Widget for TextOverlay<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         for node in self.nodes {
-            // Map CSS pixel position to terminal cell coordinates.
-            // Use a slight vertical offset (15% of height) to skip top padding
-            // in the element's bounding box and land closer to the text baseline.
-            let text_y = node.y + node.height * 0.15;
+            // Use the tight text y directly — the JS now gives us the Range
+            // bounding box rather than the parent element box, so no heuristic
+            // offset is needed.
             let col = (node.x / self.cell_pixels.x).floor() as u16;
-            let row = (text_y / self.cell_pixels.y).floor() as u16;
+            let row = (node.y / self.cell_pixels.y).floor() as u16;
 
             if col >= area.width || row >= area.height {
                 continue;
@@ -188,7 +190,6 @@ fn sample_cell_bg(
     row: u16,
     cell_pixels: Vec2,
 ) -> Option<(u8, u8, u8)> {
-    // Center of the cell in browser pixel space.
     let px = ((col as f32 + 0.5) * cell_pixels.x) as usize;
     let py = ((row as f32 + 0.5) * cell_pixels.y) as usize;
 
@@ -200,7 +201,7 @@ fn sample_cell_bg(
         return None;
     }
 
-    Some((pixels[idx], pixels[idx + 1], pixels[idx + 2])) // RGBA → RGB
+    Some((pixels[idx], pixels[idx + 1], pixels[idx + 2]))
 }
 
 /// Convert an RGB triple to a ratatui `Color` based on terminal capability.
@@ -222,7 +223,6 @@ fn ensure_contrast(fg: Color, bg: Color) -> Color {
     let fg_luma = fr as u32 * 77 + fg_c as u32 * 150 + fb as u32 * 29;
     let bg_luma = br as u32 * 77 + bg_c as u32 * 150 + bb as u32 * 29;
 
-    // Roughly 3:1 contrast ratio threshold.
     if fg_luma.abs_diff(bg_luma) >= 6000 {
         return fg;
     }
@@ -239,7 +239,7 @@ fn rgb_of(color: Color) -> (u8, u8, u8) {
         Color::Rgb(r, g, b) => (r, g, b),
         Color::Black => (0, 0, 0),
         Color::White => (255, 255, 255),
-        Color::Reset => (128, 128, 128), // neutral fallback
+        Color::Reset => (128, 128, 128),
         _ => (128, 128, 128),
     }
 }
@@ -259,7 +259,37 @@ fn truncate_to_width(s: &str, max_cols: usize) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// JavaScript extraction script
+// JavaScript — text suppression
+// ---------------------------------------------------------------------------
+
+/// Injected once per page load (on `LoadStatus::Complete`) to make all text
+/// transparent in Servo's pixel render. Layout and bounding boxes are fully
+/// preserved — only the paint color changes — so `EXTRACTION_SCRIPT` still
+/// returns accurate positions for the native terminal text overlay.
+///
+/// A sentinel attribute (`data-carboxyl-suppress`) guards against duplicate
+/// injection on pages that fire multiple load-complete notifications.
+pub const SUPPRESS_TEXT_SCRIPT: &str = r#"
+(function() {
+    const ATTR = 'data-carboxyl-suppress';
+    if (document.documentElement.hasAttribute(ATTR)) return;
+    document.documentElement.setAttribute(ATTR, '1');
+
+    const style = document.createElement('style');
+    style.id = 'carboxyl-text-suppress';
+    style.textContent = `
+        * {
+            color: transparent !important;
+            caret-color: transparent !important;
+            text-shadow: none !important;
+        }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+})()
+"#;
+
+// ---------------------------------------------------------------------------
+// JavaScript — text extraction
 // ---------------------------------------------------------------------------
 
 /// Evaluates on the page and returns an Array of Objects with fields:
@@ -267,14 +297,32 @@ fn truncate_to_width(s: &str, max_cols: usize) -> String {
 ///
 /// Covers:
 /// - Regular text nodes via TreeWalker
-/// - `<input>` and `<textarea>` values (which have no text node children)
+/// - `<button>` and `<select>` elements
+/// - `<input>` and `<textarea>` values
 /// - `[contenteditable]` elements
 /// - Filters: off-screen, zero-size, hidden, whitespace-only
 pub const EXTRACTION_SCRIPT: &str = r#"
 (function() {
     const vh = window.innerHeight;
     const vw = window.innerWidth;
+    const seen = new WeakSet();
     const nodes = [];
+
+    function visible(r) {
+        return r && r.width > 0 && r.height > 0
+            && r.bottom > 0 && r.top < vh
+            && r.right > 0 && r.left < vw;
+    }
+
+    function push(el, text, r) {
+        if (seen.has(el)) return;
+        seen.add(el);
+        const s = getComputedStyle(el);
+        if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return;
+        // color is now transparent after injection; read the channel values
+        // anyway — they survive the transparency and parse_css_color ignores alpha.
+        nodes.push({ t: text, x: r.left, y: r.top, w: r.width, h: r.height, c: s.color });
+    }
 
     // --- Regular text nodes ---
     const walker = document.createTreeWalker(
@@ -284,29 +332,31 @@ pub const EXTRACTION_SCRIPT: &str = r#"
     );
     let node;
     while ((node = walker.nextNode())) {
-        const text = node.textContent;
-        if (!text || !text.trim()) continue;
+        const text = (node.textContent || '').trim();
+        if (!text) continue;
         const el = node.parentElement;
         if (!el) continue;
         const r = el.getBoundingClientRect();
-        if (!r || r.width <= 0 || r.height <= 0) continue;
-        if (r.top >= vh || r.bottom <= 0 || r.left >= vw || r.right <= 0) continue;
-        const s = getComputedStyle(el);
-        if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') continue;
-        nodes.push({ t: text.trim(), x: r.left, y: r.top, w: r.width, h: r.height, c: s.color });
+        if (!visible(r)) continue;
+        push(el, text, r);
     }
 
-    // --- Input fields and textareas ---
-    const inputs = document.querySelectorAll('input[type="text"], input[type="search"], input:not([type]), textarea, [contenteditable="true"]');
-    for (const el of inputs) {
-        const text = el.value !== undefined ? el.value : el.textContent;
-        if (!text || !text.trim()) continue;
+    // --- Form controls + buttons whose text isn't reachable via TreeWalker ---
+    const controls = document.querySelectorAll(
+        'button, select, ' +
+        'input[type="text"], input[type="search"], input[type="submit"], ' +
+        'input[type="button"], input[type="reset"], input[type="email"], ' +
+        'input[type="url"], input[type="tel"], input[type="number"], ' +
+        'input:not([type]), textarea, [contenteditable]'
+    );
+    for (const el of controls) {
+        const text = ((el.value !== undefined && el.value !== '')
+            ? el.value
+            : el.textContent || '').trim();
+        if (!text) continue;
         const r = el.getBoundingClientRect();
-        if (!r || r.width <= 0 || r.height <= 0) continue;
-        if (r.top >= vh || r.bottom <= 0) continue;
-        const s = getComputedStyle(el);
-        if (s.display === 'none' || s.visibility === 'hidden') continue;
-        nodes.push({ t: text.trim(), x: r.left, y: r.top, w: r.width, h: r.height, c: s.color });
+        if (!visible(r)) continue;
+        push(el, text, r);
     }
 
     return nodes;
