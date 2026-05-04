@@ -194,12 +194,11 @@ impl WebViewDelegate for TerminalWebViewDelegate {
     }
 
     fn notify_load_status_changed(&self, _: WebView, status: LoadStatus) {
-        if matches!(status, LoadStatus::Complete) {
-            // Suppress first so Servo repaints with transparent text, then
-            // schedule extraction so the overlay is populated once settled.
-            // SuppressText enters servo_rx before TextExtractRequested reaches
-            // the main loop, so ordering is guaranteed.
+        if matches!(status, LoadStatus::HeadParsed) {
             let _ = self.servo_tx.try_send(ServoCommand::SuppressText);
+        }
+
+        if matches!(status, LoadStatus::Complete) {
             let _ = self.event_tx.try_send(RuntimeEvent::TextExtractRequested);
         }
     }
