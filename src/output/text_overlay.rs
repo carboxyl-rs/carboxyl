@@ -17,6 +17,7 @@ use ratatui::{
     widgets::Widget,
 };
 use servo::JSValue;
+use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
 
 // ---------------------------------------------------------------------------
@@ -149,10 +150,12 @@ impl<'a> TextOverlay<'a> {
 
 impl Widget for TextOverlay<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // Terminal cells written this frame — (absolute_x, absolute_y).
+        // Earlier nodes in DOM order take priority; later nodes truncate
+        // at the first occupied cell so they never overwrite.
+        let mut occupied: HashSet<(u16, u16)> = HashSet::new();
+
         for node in self.nodes {
-            // Use the tight text y directly — the JS now gives us the Range
-            // bounding box rather than the parent element box, so no heuristic
-            // offset is needed.
             let col = (node.x / self.cell_pixels.x).floor() as u16;
             let row = (node.y / self.cell_pixels.y).floor() as u16;
 
@@ -164,7 +167,6 @@ impl Widget for TextOverlay<'_> {
             let y = area.y + row;
             let max_cols = (area.width - col) as usize;
 
-            // Sample background from pixel buffer at this cell's center.
             let bg = self
                 .pixels
                 .and_then(|(px, pw, ph)| sample_cell_bg(px, pw, ph, col, row, self.cell_pixels))
@@ -173,10 +175,52 @@ impl Widget for TextOverlay<'_> {
 
             let fg = ensure_contrast(node.color, bg);
 
-            let text = truncate_to_width(&node.text, max_cols);
+            // Truncate to area edge AND to first occupied cell.
+            let text = truncate_to_available(&node.text, x, y, max_cols, &occupied);
+            if text.is_empty() {
+                continue;
+            }
+
+            // Mark cells occupied before the next node runs.
+            let mut cursor = x;
+            for ch in text.chars() {
+                let w = ch.to_string().width() as u16;
+                for i in 0..w {
+                    occupied.insert((cursor + i, y));
+                }
+                cursor += w;
+            }
+
             buf.set_string(x, y, &text, Style::new().fg(fg).bg(bg));
         }
     }
+}
+
+/// Like `truncate_to_width`, but also stops at the first cell already
+/// claimed by a previously rendered node.
+fn truncate_to_available(
+    s: &str,
+    x: u16,
+    y: u16,
+    max_cols: usize,
+    occupied: &HashSet<(u16, u16)>,
+) -> String {
+    let mut width = 0;
+    let mut result = String::new();
+    let mut cursor = x;
+    for ch in s.chars() {
+        let w = ch.to_string().width();
+        if width + w > max_cols {
+            break;
+        }
+        if occupied.contains(&(cursor, y)) {
+            break;
+        }
+        result.push(ch);
+        width += w;
+        cursor += w as u16;
+    }
+    result
 }
 
 /// Sample the average color of a terminal cell from the pixel buffer.
@@ -244,20 +288,6 @@ fn rgb_of(color: Color) -> (u8, u8, u8) {
     }
 }
 
-fn truncate_to_width(s: &str, max_cols: usize) -> String {
-    let mut width = 0;
-    let mut result = String::new();
-    for ch in s.chars() {
-        let w = ch.to_string().width();
-        if width + w > max_cols {
-            break;
-        }
-        result.push(ch);
-        width += w;
-    }
-    result
-}
-
 // ---------------------------------------------------------------------------
 // JavaScript integration
 // ---------------------------------------------------------------------------
@@ -269,7 +299,6 @@ fn truncate_to_width(s: &str, max_cols: usize) -> String {
 ///
 /// A sentinel attribute (`data-carboxyl-suppress`) guards against duplicate
 /// injection on pages that fire multiple load-complete notifications.
-
 pub const SUPPRESS_TEXT_SCRIPT: &str = include_str!("suppress.js");
 
 /// Evaluates on the page and returns an Array of Objects with fields:

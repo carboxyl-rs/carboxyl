@@ -62,9 +62,7 @@ pub fn register() -> io::Result<()> {
             // Step 2: reset disposition and re-deliver with default behaviour
             // (core dump / exit status). emulate_default_handler is atomic:
             // it unregisters this handler before raising, preventing re-entry.
-            let _ = signal_hook::low_level::emulate_default_handler(
-                signal_hook::consts::SIGABRT,
-            );
+            let _ = signal_hook::low_level::emulate_default_handler(signal_hook::consts::SIGABRT);
         })?;
     }
 

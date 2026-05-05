@@ -507,6 +507,7 @@ fn event_loop(
     while running {
         match event_rx.recv_timeout(IDLE_TIMEOUT) {
             Ok(RuntimeEvent::Input(event)) => {
+                let is_scroll = matches!(event, input::Event::Scroll { .. });
                 handle_input(
                     event,
                     &servo_tx,
@@ -515,7 +516,10 @@ fn event_loop(
                     &mut pointer,
                     &mut running,
                 )?;
+
+                let mut any_scroll = is_scroll;
                 while let Ok(RuntimeEvent::Input(event)) = event_rx.try_recv() {
+                    any_scroll |= matches!(event, input::Event::Scroll { .. });
                     handle_input(
                         event,
                         &servo_tx,
@@ -525,9 +529,17 @@ fn event_loop(
                         &mut running,
                     )?;
                 }
+
+                // Request a fresh extraction immediately on scroll, bypassing the debounce.
+                // We deliberately do NOT clear text_nodes — keeping the previous text visible
+                // while Servo repaints is less jarring than the blank gap that clearing causes.
+                if any_scroll && native_text {
+                    let _ = servo_tx.try_send(ServoCommand::ExtractText);
+                    last_extract = Instant::now();
+                }
+
                 pending_paint = true;
             }
-
             Ok(RuntimeEvent::Wake) => {
                 if last_paint_cmd.elapsed() >= frame_budget {
                     let _ = servo_tx.try_send(ServoCommand::Paint);
