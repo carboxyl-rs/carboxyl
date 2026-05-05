@@ -134,6 +134,7 @@ impl EventLoopWaker for ServoWaker {
 struct TerminalWebViewDelegate {
     event_tx: mpsc::SyncSender<RuntimeEvent>,
     servo_tx: mpsc::SyncSender<ServoCommand>,
+    native_text: bool,
 }
 
 impl WebViewDelegate for TerminalWebViewDelegate {
@@ -194,11 +195,11 @@ impl WebViewDelegate for TerminalWebViewDelegate {
     }
 
     fn notify_load_status_changed(&self, _: WebView, status: LoadStatus) {
-        if matches!(status, LoadStatus::HeadParsed) {
+        if self.native_text && matches!(status, LoadStatus::HeadParsed) {
             let _ = self.servo_tx.try_send(ServoCommand::SuppressText);
         }
 
-        if matches!(status, LoadStatus::Complete) {
+        if self.native_text && matches!(status, LoadStatus::Complete) {
             let _ = self.event_tx.try_send(RuntimeEvent::TextExtractRequested);
         }
     }
@@ -281,12 +282,20 @@ pub fn run(cli: Cli) -> AppResult<()> {
         let servo_tx_waker = servo_tx.clone();
         let url = normalize_url(cli.url.clone())?;
         let browser_size = physical_size(window.browser);
+        let native_text = !cli.no_native_text;
 
         thread::Builder::new()
             .name("servo".to_owned())
             .stack_size(64 * 1024 * 1024)
             .spawn(move || {
-                servo_thread(event_tx, servo_tx_waker, servo_rx, url, browser_size);
+                servo_thread(
+                    event_tx,
+                    servo_tx_waker,
+                    servo_rx,
+                    url,
+                    browser_size,
+                    native_text,
+                );
             })
             .expect("failed to spawn servo thread")
     };
@@ -318,6 +327,7 @@ fn servo_thread(
     servo_rx: mpsc::Receiver<ServoCommand>,
     url: Url,
     browser_size: PhysicalSize<u32>,
+    native_text: bool,
 ) {
     let servo = ServoBuilder::default()
         .preferences(browser_preferences(Preferences::default()))
@@ -341,6 +351,7 @@ fn servo_thread(
     let delegate: Rc<dyn WebViewDelegate> = Rc::new(TerminalWebViewDelegate {
         event_tx: event_tx.clone(),
         servo_tx: servo_tx.clone(),
+        native_text,
     });
 
     let webview = WebViewBuilder::new(&servo, rendering_context.clone())
