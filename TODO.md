@@ -4,9 +4,9 @@
 
   * Texts often colide and overwrite each other
   * Test for unrendered text
-  * Performance optimization (on native text, maybe whole browser also)
+  * Performance optimization (on native text)
 
-* Main keys are working but it'd be better if every single key were sent to servo; like (ctrl, shift) alone and combinations
+* Main keys are working but it'd be better if every single key were sent to servo exactly as they are; like (ctrl, shift) alone and combinations
 
 * A fancy browser ui (as ratatui is already implemented)
 
