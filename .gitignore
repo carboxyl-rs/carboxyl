@@ -1,12 +1,1 @@
-.DS_Store
-node_modules/
-
-/.ccache
-/.git_cache
-/.vscode
-/build
-/chromium/*
-!/chromium/.gclient
-!/chromium/depot_tools
-!/chromium/patches
-/packages/*/build
+/target

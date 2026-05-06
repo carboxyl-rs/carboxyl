@@ -1,4 +1,7 @@
 _Copyright © 2023, Fathy Boundjadj_
+_Copyright © 2026, orhun_
+_Copyright © 2026, gold-silver-copper_
+_Copyright © 2026, takashialpha_
 _All rights reserved._
 
 Redistribution and use in source and binary forms, with or without

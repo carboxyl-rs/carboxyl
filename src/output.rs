@@ -1,18 +1,11 @@
-// mod kd_tree;
-// mod quantizer;
-mod cell;
-mod frame_sync;
-mod painter;
-mod quad;
-mod render_thread;
-mod renderer;
+mod browser_widget;
+mod nav_widget;
+mod text_overlay;
 mod window;
-mod xterm;
 
-pub use cell::*;
-pub use frame_sync::*;
-pub use painter::*;
-pub use quad::*;
-pub use render_thread::*;
-pub use renderer::*;
-pub use window::*;
+pub use browser_widget::{BrowserFrame, BrowserWidget};
+pub use nav_widget::{NavAction, NavState, NavWidget};
+pub use text_overlay::{
+    EXTRACTION_SCRIPT, SUPPRESS_TEXT_SCRIPT, TextNode, TextOverlay, parse_js_nodes,
+};
+pub use window::Window;
