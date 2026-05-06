@@ -18,10 +18,13 @@ pub struct Cli {
 
     /// Rendering resolution: pixels rendered per terminal cell.
     /// Each cell encodes a 2×4 sub-pixel grid; higher values give Servo
-    /// more pixels to render into before downsampling. Default 200 = 4×8px/cell.
-    #[arg(short = 'r', long = "resolution", default_value_t = 200)]
+    /// more pixels to render into before downsampling. Default 400 as
+    /// it works best with terminal native text.
+    #[arg(short = 'r', long = "resolution", default_value_t = 400)]
     pub resolution: u32,
-
+    /* resolution: consider renaming and/or scaling it to make 100 -> what 400 looks like
+    'd recommend go back zoom but as a percentage, just like most gui browsers do.
+    */
     /// Disable native terminal text rendering.
     /// By default, text is extracted from the page and rendered using the
     /// terminal's own glyph pipeline for crisp, resolution-independent output.

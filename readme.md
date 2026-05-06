@@ -52,6 +52,24 @@ The build is now a normal Cargo build for the `carboxyl` binary. The first build
 - Terminal input (by crossterm) is translated directly into Servo input events.
 - Output is being handled with ratatui.
 
+## TODO
+
+* Text rendering using terminal native text (IN PROGRESS)
+
+  * Texts often colide and overwrite each other
+  * Test for unrendered text
+  * Performance optimization (on native text)
+
+* Main keys are working but it'd be better if every single key were sent to servo exactly as they are; like (ctrl, shift) alone and combinations
+
+* Consider reviewing --resolution implementation; it'd be better to have --zoom where -r 400 defaults to --zoom 100 (as a percentage): just like mordern gui browsers.
+
+* A fancy browser ui (as ratatui is already implemented)
+
+* Optional hi-res terminal graphics (Sixel / Kitty)
+
+  * Feature detection + ANSI fallback
+
 ## Notes
 
 - Please build only with --release, otherwise you may get panics on runtime. Release builds might take some time, but way less than compiling chromium.
