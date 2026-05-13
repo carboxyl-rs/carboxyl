@@ -117,10 +117,9 @@ pub fn servo_thread(
             extract_text(&webview, event_tx.clone());
         }
 
-        if should_paint
-            && let Some(frame) = paint(&webview, rendering_context.as_ref()) {
-                let _ = event_tx.try_send(RuntimeEvent::Frame(frame));
-            }
+        if should_paint && let Some(frame) = paint(&webview, rendering_context.as_ref()) {
+            let _ = event_tx.try_send(RuntimeEvent::Frame(frame));
+        }
 
         thread::sleep(Duration::from_millis(1));
     }
@@ -129,9 +128,10 @@ pub fn servo_thread(
 fn suppress_text(webview: &WebView) {
     webview.evaluate_javascript(SUPPRESS_TEXT_SCRIPT, |result| {
         if let Err(e) = result
-            && !matches!(e, JavaScriptEvaluationError::WebViewNotReady) {
-                warn!("text suppression failed: {e:?}");
-            }
+            && !matches!(e, JavaScriptEvaluationError::WebViewNotReady)
+        {
+            warn!("text suppression failed: {e:?}");
+        }
     });
 }
 

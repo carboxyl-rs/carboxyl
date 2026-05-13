@@ -17,12 +17,15 @@ pub fn spawn_input_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHan
                     error!("crossterm poll: {e}");
                     break;
                 }
+
                 Ok(false) => {
                     if tx.try_send(RuntimeEvent::Wake).is_err() {
                         break;
                     }
+
                     continue;
                 }
+
                 Ok(true) => {}
             }
 
@@ -31,14 +34,19 @@ pub fn spawn_input_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHan
                     error!("crossterm read: {e}");
                     break;
                 }
+
                 Ok(crossterm::event::Event::Resize(cols, rows)) => {
                     let _ = tx.try_send(RuntimeEvent::Resize(cols, rows));
                 }
-                Ok(ev) => {
-                    let events = input::Event::from_crossterm(ev);
-                    for event in events {
+
+                Ok(event) => {
+                    for event in input::Event::from_crossterm(event) {
                         let is_exit = matches!(event, Event::Exit);
-                        let _ = tx.try_send(RuntimeEvent::Input(event));
+
+                        if tx.try_send(RuntimeEvent::Input(event)).is_err() {
+                            return;
+                        }
+
                         if is_exit {
                             return;
                         }

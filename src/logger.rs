@@ -31,7 +31,7 @@ pub fn print_log_path_if_nonempty(log_path: Option<PathBuf>) {
         && std::fs::metadata(&path)
             .map(|m| m.len() > 0)
             .unwrap_or(false)
-        {
-            eprintln!("carboxyl logs written to {}", path.display());
-        }
+    {
+        eprintln!("carboxyl logs written to {}", path.display());
+    }
 }

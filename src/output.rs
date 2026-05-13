@@ -9,3 +9,17 @@ pub use text_overlay::{
     EXTRACTION_SCRIPT, SUPPRESS_TEXT_SCRIPT, TextNode, TextOverlay, parse_js_nodes,
 };
 pub use window::Window;
+
+use crossterm::event::{DisableMouseCapture, PopKeyboardEnhancementFlags};
+use std::io;
+
+pub fn restore_terminal() {
+    crossterm::execute!(
+        io::stdout(),
+        PopKeyboardEnhancementFlags,
+        DisableMouseCapture,
+    )
+    .ok();
+
+    ratatui::restore();
+}

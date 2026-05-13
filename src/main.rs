@@ -1,5 +1,6 @@
 use carboxyl::browser::AppResult;
 use carboxyl::cli::Cli;
+use carboxyl::output::restore_terminal;
 use clap::Parser;
 
 fn main() -> AppResult<()> {
@@ -12,8 +13,7 @@ fn main() -> AppResult<()> {
 
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        ratatui::restore();
-        crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture,).ok();
+        restore_terminal();
         default_hook(info);
     }));
 

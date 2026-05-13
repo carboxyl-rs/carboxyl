@@ -18,7 +18,6 @@ use crate::output::{
 
 use super::events::{DelegateEvent, RuntimeEvent, ServoCommand};
 use super::geometry::{BrowserPoint, physical_size};
-use super::keyboard::map_keyboard_event;
 use super::url::normalize_url;
 
 pub type AppResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -194,69 +193,95 @@ fn handle_input(
     running: &mut bool,
 ) -> AppResult<()> {
     match event {
-        input::Event::Exit => *running = false,
+        input::Event::Exit => {
+            *running = false;
+        }
 
-        input::Event::Scroll { delta } => {
+        input::Event::Keyboard(key_event) => {
+            let action = nav.keyboard(&key_event.event.key, key_event.event.modifiers);
+
+            let forward = matches!(action, NavAction::Forward);
+
+            dispatch_nav(action, servo_tx)?;
+
+            if forward {
+                let _ = servo_tx.try_send(ServoCommand::Input(InputEvent::Keyboard(key_event)));
+            }
+        }
+
+        input::Event::Scroll {
+            delta_x,
+            delta_y,
+            row,
+            col,
+            ..
+        } => {
+            let p = BrowserPoint::from_cell(window, col, row);
+
+            *pointer = p;
+
             let ev = InputEvent::Wheel(WheelEvent::new(
                 WheelDelta {
-                    x: 0.0,
-                    y: delta as f64 * window.cell_pixels.y as f64,
+                    x: delta_x as f64 * window.cell_pixels.x as f64,
+                    y: delta_y as f64 * window.cell_pixels.y as f64,
                     z: 0.0,
                     mode: WheelMode::DeltaPixel,
                 },
-                pointer.to_webview_point(),
+                p.to_webview_point(),
             ));
+
             let _ = servo_tx.try_send(ServoCommand::Input(ev));
         }
 
-        input::Event::KeyPress(key) => {
-            let action = nav.keypress(&key.logical, key.modifiers.alt, key.modifiers.meta);
-            let forward = matches!(action, NavAction::Forward);
-            dispatch_nav(action, servo_tx)?;
+        input::Event::MouseButton {
+            button,
+            state,
+            row,
+            col,
+            ..
+        } => {
+            let servo_button = match button {
+                input::MouseButton::Left => MouseButton::Left,
+                input::MouseButton::Middle => MouseButton::Middle,
+                input::MouseButton::Right => MouseButton::Right,
+            };
 
-            if forward
-                && let Some((down, up)) = map_keyboard_event(&key) {
-                    let _ = servo_tx.try_send(ServoCommand::Input(InputEvent::Keyboard(down)));
-                    let _ = servo_tx.try_send(ServoCommand::Input(InputEvent::Keyboard(up)));
-                }
-        }
-
-        input::Event::MouseDown { row, col } => {
-            let action = nav.mouse_down(col, row);
-            if matches!(action, NavAction::Forward) {
-                let p = BrowserPoint::from_cell(window, col, row);
-                *pointer = p;
-                let ev = InputEvent::MouseButton(MouseButtonEvent::new(
-                    MouseButtonAction::Down,
-                    MouseButton::Left,
-                    p.to_webview_point(),
-                ));
-                let _ = servo_tx.try_send(ServoCommand::Input(ev));
-            } else {
-                dispatch_nav(action, servo_tx)?;
-            }
-        }
-
-        input::Event::MouseUp { row, col } => {
-            let action = nav.mouse_up(col, row);
-            if matches!(action, NavAction::Forward) {
-                let p = BrowserPoint::from_cell(window, col, row);
-                *pointer = p;
-                let ev = InputEvent::MouseButton(MouseButtonEvent::new(
-                    MouseButtonAction::Up,
-                    MouseButton::Left,
-                    p.to_webview_point(),
-                ));
-                let _ = servo_tx.try_send(ServoCommand::Input(ev));
-            } else {
-                dispatch_nav(action, servo_tx)?;
-            }
-        }
-
-        input::Event::MouseMove { row, col } => {
             let p = BrowserPoint::from_cell(window, col, row);
+
             *pointer = p;
+
+            let nav_action = match state {
+                input::MouseButtonState::Down => nav.mouse_down(col, row),
+
+                input::MouseButtonState::Up => nav.mouse_up(col, row),
+            };
+
+            if matches!(nav_action, NavAction::Forward) {
+                let servo_state = match state {
+                    input::MouseButtonState::Down => MouseButtonAction::Down,
+
+                    input::MouseButtonState::Up => MouseButtonAction::Up,
+                };
+
+                let ev = InputEvent::MouseButton(MouseButtonEvent::new(
+                    servo_state,
+                    servo_button,
+                    p.to_webview_point(),
+                ));
+
+                let _ = servo_tx.try_send(ServoCommand::Input(ev));
+            } else {
+                dispatch_nav(nav_action, servo_tx)?;
+            }
+        }
+
+        input::Event::MouseMove { row, col, .. } => {
+            let p = BrowserPoint::from_cell(window, col, row);
+
+            *pointer = p;
+
             let ev = InputEvent::MouseMove(MouseMoveEvent::new(p.to_webview_point()));
+
             let _ = servo_tx.try_send(ServoCommand::Input(ev));
         }
     }

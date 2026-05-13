@@ -13,16 +13,21 @@ use std::io;
 use std::sync::mpsc;
 use std::thread;
 
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{
+    EnableMouseCapture, KeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use rustls::crypto::CryptoProvider;
 
 use crate::cli::Cli;
 use crate::output::Window;
 
-pub use self::event_loop::AppResult;
+pub use event_loop::AppResult;
+pub use keyboard::map_keyboard_event;
+
 use self::geometry::physical_size;
 
 use crate::logger;
+use crate::output::restore_terminal;
 
 pub fn run(cli: Cli) -> AppResult<()> {
     let log_path = logger::init_logger(&cli)?;
@@ -33,7 +38,16 @@ pub fn run(cli: Cli) -> AppResult<()> {
     let (servo_tx, servo_rx) = mpsc::sync_channel::<events::ServoCommand>(128);
 
     let terminal = ratatui::init();
-    crossterm::execute!(io::stdout(), EnableMouseCapture)?;
+
+    crossterm::execute!(
+        io::stdout(),
+        EnableMouseCapture,
+        PushKeyboardEnhancementFlags(
+            KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+        ),
+    )?;
 
     let true_color = u32::from(crossterm::style::available_color_count()) >= (1u32 << 24);
 
@@ -85,10 +99,10 @@ fn shutdown(
     log_path: Option<std::path::PathBuf>,
 ) {
     let _ = servo_tx.try_send(events::ServoCommand::Shutdown);
+
     let _ = servo_handle.join();
 
-    crossterm::execute!(io::stdout(), DisableMouseCapture).ok();
-    ratatui::restore();
+    restore_terminal();
 
     logger::print_log_path_if_nonempty(log_path);
 }

@@ -8,6 +8,8 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 use url::Url;
 
+use servo::{Key as ServoKey, Modifiers as ServoModifiers, NamedKey};
+
 // ---------------------------------------------------------------------------
 // Layout constants
 // ---------------------------------------------------------------------------
@@ -85,58 +87,86 @@ impl NavState {
         self.staged.as_deref().unwrap_or(self.url.as_str())
     }
 
-    pub fn keypress(
-        &mut self,
-        logical: &crate::input::LogicalKey,
-        alt: bool,
-        meta: bool,
-    ) -> NavAction {
-        use crate::input::LogicalKey;
-
-        let modifier = if cfg!(target_os = "macos") { meta } else { alt };
+    pub fn keyboard(&mut self, key: &ServoKey, modifiers: ServoModifiers) -> NavAction {
+        let modifier = if cfg!(target_os = "macos") {
+            modifiers.contains(ServoModifiers::META)
+        } else {
+            modifiers.contains(ServoModifiers::ALT)
+        };
 
         match self.cursor {
-            None => match (modifier, logical) {
-                (true, LogicalKey::ArrowLeft) => NavAction::GoBack,
-                (true, LogicalKey::ArrowRight) => NavAction::GoForward,
+            None => match (modifier, key) {
+                (true, ServoKey::Named(NamedKey::ArrowLeft)) => NavAction::GoBack,
+
+                (true, ServoKey::Named(NamedKey::ArrowRight)) => NavAction::GoForward,
+
                 _ => NavAction::Forward,
             },
+
             Some(cursor) => {
-                match logical {
-                    LogicalKey::Enter => {
+                match key {
+                    ServoKey::Named(NamedKey::Enter) => {
                         let raw = self.displayed_url().to_owned();
                         self.staged = None;
                         self.cursor = None;
+
                         return NavAction::GoTo(raw);
                     }
-                    LogicalKey::ArrowUp => self.cursor = Some(0),
-                    LogicalKey::ArrowDown => {
+
+                    ServoKey::Named(NamedKey::ArrowUp) => {
+                        self.cursor = Some(0);
+                    }
+
+                    ServoKey::Named(NamedKey::ArrowDown) => {
                         self.cursor = Some(self.displayed_url().width());
                     }
-                    LogicalKey::ArrowRight => {
+
+                    ServoKey::Named(NamedKey::ArrowRight) => {
                         self.cursor = Some((cursor + 1).min(self.displayed_url().width()));
                     }
-                    LogicalKey::ArrowLeft => {
+
+                    ServoKey::Named(NamedKey::ArrowLeft) => {
                         self.cursor = Some(cursor.saturating_sub(1));
                     }
-                    LogicalKey::Backspace if cursor > 0 => {
+
+                    ServoKey::Named(NamedKey::Backspace) if cursor > 0 => {
                         let buf = self
                             .staged
                             .get_or_insert_with(|| self.url.as_str().to_owned());
+
                         if cursor <= buf.len() {
                             buf.remove(cursor - 1);
                             self.cursor = Some(cursor - 1);
                         }
                     }
-                    LogicalKey::Char(c) if (*c as u8) >= 0x20 => {
+
+                    ServoKey::Named(NamedKey::Delete) => {
                         let buf = self
                             .staged
                             .get_or_insert_with(|| self.url.as_str().to_owned());
-                        buf.insert(cursor, *c);
-                        self.cursor = Some((cursor + 1).min(buf.width()));
+
+                        if cursor < buf.len() {
+                            buf.remove(cursor);
+                        }
                     }
+
+                    ServoKey::Character(text) => {
+                        if let Some(ch) = text.chars().next()
+                            && !ch.is_control()
+                        {
+                            let buf = self
+                                .staged
+                                .get_or_insert_with(|| self.url.as_str().to_owned());
+
+                            buf.insert(cursor, ch);
+
+                            self.cursor = Some((cursor + 1).min(buf.width()));
+                        }
+                    }
+
                     _ => {}
                 }
+
                 NavAction::Ignore
             }
         }
