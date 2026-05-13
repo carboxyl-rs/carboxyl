@@ -3,25 +3,33 @@ use crossterm::event::{
     MouseEventKind,
 };
 
-/// A normalised input event. This is what `servo_runtime` receives from the
-/// input thread — crossterm's raw types never cross that boundary.
-#[derive(Clone, Debug)]
-pub enum Event {
-    KeyPress(Key),
-    MouseDown { row: u16, col: u16 },
-    MouseUp { row: u16, col: u16 },
-    MouseMove { row: u16, col: u16 },
-    Scroll { delta: isize },
-    Exit,
+// ---------------------------------------------------------------------------
+// Logical key representation
+// ---------------------------------------------------------------------------
+
+/// The logical meaning of a key press, independent of physical position.
+///
+/// `Named` variants cover all non-character keys we care about; printable
+/// ASCII characters are carried as `Char(char)`. Keys we don't handle produce
+/// a `TryFrom` error and are silently dropped at the call site.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LogicalKey {
+    Char(char),
+    Enter,
+    Tab,
+    Backspace,
+    Escape,
+    ArrowUp,
+    ArrowDown,
+    ArrowRight,
+    ArrowLeft,
+    Delete,
 }
 
-/// A normalised key, carrying the logical character and active modifiers.
+/// A normalised key event: logical meaning plus active modifier flags.
 #[derive(Clone, Debug)]
 pub struct Key {
-    /// The logical byte value used for Servo's keyboard event mapping.
-    /// Uses the same encoding as the old parser: 0x11–0x14 for arrows,
-    /// 0x0d for Enter, 0x1b for Escape, 0x7f for Backspace, etc.
-    pub char: u8,
+    pub logical: LogicalKey,
     pub modifiers: KeyMods,
 }
 
@@ -44,70 +52,96 @@ impl KeyMods {
     }
 }
 
-/// Translate a crossterm `KeyEvent` into our `Key`, returning `None` for
-/// keys we don't handle (function keys, media keys, etc.).
-pub fn map_key_event(event: KeyEvent) -> Option<Key> {
-    let mods = KeyMods::from_crossterm(event.modifiers);
+// ---------------------------------------------------------------------------
+// TryFrom<KeyEvent> for Key
+// ---------------------------------------------------------------------------
 
-    let char = match event.code {
-        KeyCode::Char(c) if event.modifiers.contains(KeyModifiers::CONTROL) => {
-            let lower = c.to_ascii_lowercase();
-            if lower.is_ascii_alphabetic() {
-                lower as u8 - b'a' + 1
-            } else {
-                c as u8
-            }
-        }
-        KeyCode::Char(c) if c.is_ascii() => c as u8,
-        KeyCode::Enter => 0x0d,
-        KeyCode::Tab => 0x09,
-        KeyCode::Backspace => 0x7f,
-        KeyCode::Esc => 0x1b,
-        KeyCode::Up => 0x11,
-        KeyCode::Down => 0x12,
-        KeyCode::Right => 0x13,
-        KeyCode::Left => 0x14,
-        KeyCode::Delete => 0x7f,
-        _ => return None,
-    };
+/// Fails (returns `Err(())`) for keys we don't handle: function keys, media
+/// keys, non-ASCII `Char` events, etc.
+impl TryFrom<KeyEvent> for Key {
+    type Error = ();
 
-    Some(Key {
-        char,
-        modifiers: mods,
-    })
+    fn try_from(event: KeyEvent) -> Result<Self, Self::Error> {
+        let mods = KeyMods::from_crossterm(event.modifiers);
+
+        let logical = match event.code {
+            KeyCode::Enter => LogicalKey::Enter,
+            KeyCode::Tab => LogicalKey::Tab,
+            KeyCode::Backspace | KeyCode::Delete => LogicalKey::Backspace,
+            KeyCode::Esc => LogicalKey::Escape,
+            KeyCode::Up => LogicalKey::ArrowUp,
+            KeyCode::Down => LogicalKey::ArrowDown,
+            KeyCode::Right => LogicalKey::ArrowRight,
+            KeyCode::Left => LogicalKey::ArrowLeft,
+            KeyCode::Char(c) if c.is_ascii() => LogicalKey::Char(c),
+            _ => return Err(()),
+        };
+
+        Ok(Key {
+            logical,
+            modifiers: mods,
+        })
+    }
 }
 
-/// Translate a crossterm `Event` into zero or more of our `Event`s.
-pub fn map_crossterm_event(event: CrosstermEvent) -> Vec<Event> {
-    match event {
-        CrosstermEvent::Key(key_event) => {
-            if key_event.code == KeyCode::Char('c')
-                && key_event.modifiers.contains(KeyModifiers::CONTROL)
-            {
-                return vec![Event::Exit];
+// ---------------------------------------------------------------------------
+// Normalised input event
+// ---------------------------------------------------------------------------
+
+/// A normalised input event. Crossterm's raw types never cross this boundary
+/// into the browser subsystem.
+#[derive(Clone, Debug)]
+pub enum Event {
+    KeyPress(Key),
+    MouseDown { row: u16, col: u16 },
+    MouseUp { row: u16, col: u16 },
+    MouseMove { row: u16, col: u16 },
+    Scroll { delta: isize },
+    Exit,
+}
+
+impl Event {
+    /// Translate a crossterm event into zero or more normalised [`Event`]s.
+    ///
+    /// Returns a `Vec` because a single crossterm event can legitimately
+    /// produce no output (unrecognised key) or exactly one output. A `From`
+    /// impl on `Vec<Event>` would violate the orphan rule since both types are
+    /// foreign; an associated constructor on our own type is the idiomatic
+    /// alternative.
+    pub fn from_crossterm(event: CrosstermEvent) -> Vec<Self> {
+        match event {
+            CrosstermEvent::Key(key_event) => {
+                // Ctrl-C is a hard exit regardless of other modifier state.
+                if key_event.code == KeyCode::Char('c')
+                    && key_event.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    return vec![Event::Exit];
+                }
+
+                Key::try_from(key_event)
+                    .map(|k| vec![Event::KeyPress(k)])
+                    .unwrap_or_default()
             }
 
-            map_key_event(key_event)
-                .map(|k| vec![Event::KeyPress(k)])
-                .unwrap_or_default()
-        }
+            CrosstermEvent::Mouse(MouseEvent {
+                kind, column, row, ..
+            }) => match kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    vec![Event::MouseDown { row, col: column }]
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    vec![Event::MouseUp { row, col: column }]
+                }
+                MouseEventKind::Moved => vec![Event::MouseMove { row, col: column }],
+                MouseEventKind::ScrollUp => vec![Event::Scroll { delta: 1 }],
+                MouseEventKind::ScrollDown => vec![Event::Scroll { delta: -1 }],
+                _ => vec![],
+            },
 
-        CrosstermEvent::Mouse(MouseEvent {
-            kind, column, row, ..
-        }) => match kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                vec![Event::MouseDown { row, col: column }]
-            }
-            MouseEventKind::Up(MouseButton::Left) => {
-                vec![Event::MouseUp { row, col: column }]
-            }
-            MouseEventKind::Moved => vec![Event::MouseMove { row, col: column }],
-            MouseEventKind::ScrollUp => vec![Event::Scroll { delta: 1 }],
-            MouseEventKind::ScrollDown => vec![Event::Scroll { delta: -1 }],
+            // Resize events are intercepted by the input thread and emitted
+            // directly as RuntimeEvent::Resize — they never reach this path.
+            CrosstermEvent::Resize(..) => vec![],
             _ => vec![],
-        },
-
-        CrosstermEvent::Resize(..) => vec![],
-        _ => vec![],
+        }
     }
 }

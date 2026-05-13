@@ -14,17 +14,15 @@ pub struct Cli {
     /// Lower values reduce terminal rendering overhead and can make
     /// page interaction feel smoother under load.
     #[arg(short = 'f', long = "fps", default_value_t = 60)]
-    pub fps: u32,
+    pub fps: u16,
 
-    /// Rendering resolution: pixels rendered per terminal cell.
-    /// Each cell encodes a 2×4 sub-pixel grid; higher values give Servo
-    /// more pixels to render into before downsampling. Default 400 as
-    /// it works best with terminal native text.
-    #[arg(short = 'r', long = "resolution", default_value_t = 400)]
-    pub resolution: u32,
-    /* resolution: consider renaming and/or scaling it to make 100 -> what 400 looks like
-    'd recommend go back zoom but as a percentage, just like most gui browsers do.
-    */
+    /// Viewport scale as a percentage (100 = default).
+    /// Increase with Super+/Ctrl++ or decrease with Super-/Ctrl+- at runtime.
+    /// Higher values render more pixels per terminal cell before downsampling;
+    /// lower values trade sharpness for performance.
+    #[arg(short = 's', long = "scale", default_value_t = 100)]
+    pub scale: u32,
+
     /// Disable native terminal text rendering.
     /// By default, text is extracted from the page and rendered using the
     /// terminal's own glyph pipeline for crisp, resolution-independent output.
@@ -32,7 +30,21 @@ pub struct Cli {
     #[arg(long = "no-native-text", action = ArgAction::SetTrue)]
     pub no_native_text: bool,
 
-    /// Enable debug logs
-    #[arg(short = 'd', long = "debug", action = ArgAction::SetTrue)]
-    pub debug: bool,
+    /// Increase log verbosity. Pass up to four times for progressively
+    /// finer output: -v = warn, -vv = info, -vvv = debug, -vvvv = trace.
+    #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+    pub verbosity: u8,
+}
+
+impl Cli {
+    /// Resolve the requested verbosity to a `log::LevelFilter`.
+    pub fn log_level(&self) -> log::LevelFilter {
+        match self.verbosity {
+            0 => log::LevelFilter::Error,
+            1 => log::LevelFilter::Warn,
+            2 => log::LevelFilter::Info,
+            3 => log::LevelFilter::Debug,
+            _ => log::LevelFilter::Trace,
+        }
+    }
 }

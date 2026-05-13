@@ -1,2 +1,3 @@
-mod servo_runtime;
-pub use servo_runtime::*;
+mod servo;
+pub use servo::AppResult;
+pub use servo::run;

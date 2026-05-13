@@ -1,4 +1,5 @@
-use carboxyl::{browser::AppResult, cli::Cli};
+use carboxyl::browser::AppResult;
+use carboxyl::cli::Cli;
 use clap::Parser;
 
 fn main() -> AppResult<()> {
@@ -9,9 +10,6 @@ fn main() -> AppResult<()> {
         eprintln!("warning: failed to register signal handlers: {e}");
     }
 
-    // Global panic hook — catches Rust panics on any thread (but not fatal
-    // signals, which are handled above). Restores the terminal before
-    // printing the panic message so it's readable.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         ratatui::restore();

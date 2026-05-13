@@ -5,7 +5,7 @@ use rustix::termios::{Winsize, tcgetwinsize};
 use crate::cli::Cli;
 
 /// Snapshot of the terminal window dimensions, derived from `TIOCGWINSZ`
-/// and the CLI resolution setting. Cheap to clone — passed around by value.
+/// and the CLI scale setting. Cheap to clone — passed around by value.
 #[derive(Clone, Debug)]
 pub struct Window {
     /// Terminal size in cells (nav bar row excluded).
@@ -38,7 +38,7 @@ impl Window {
         let cols = ws_col.max(1) as u32;
         let rows = ws_row.max(2) as u32 - 1;
 
-        let zoom = cli.resolution as f32 / 100.0;
+        let zoom = cli.scale as f32 / 100.0;
         let scale = Vec2::new(2.0 * zoom, 4.0 * zoom);
 
         self.cells = UVec2::new(cols, rows);

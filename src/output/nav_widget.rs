@@ -6,42 +6,134 @@ use ratatui::{
     widgets::Widget,
 };
 use unicode_width::UnicodeWidthStr;
+use url::Url;
+
+// ---------------------------------------------------------------------------
+// Layout constants
+// ---------------------------------------------------------------------------
+
+/// Column at which the URL input field begins.
+///
+/// Derived from button widths:
+///   [‹] = 3 cols  (col 0–2)
+///   [›] = 3 cols  (col 3–5)
+///   [↻] = 3 cols  (col 6–8)
+///   "  " separator = 2 cols  (col 9–10)
+///
+/// Total prefix = 11 cols.
+const URL_FIELD_START: u16 = 11;
+
+/// Hit-test regions for the navigation bar buttons (inclusive column ranges).
+const BTN_BACK_COLS: std::ops::RangeInclusive<u16> = 0..=2;
+const BTN_FORWARD_COLS: std::ops::RangeInclusive<u16> = 3..=5;
+const BTN_RELOAD_COLS: std::ops::RangeInclusive<u16> = 6..=8;
+
+// ---------------------------------------------------------------------------
+// Navigation capability flags
+// ---------------------------------------------------------------------------
+
+/// Which history directions are currently navigable.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NavigationCapability {
+    pub back: bool,
+    pub forward: bool,
+}
+
+impl NavigationCapability {
+    pub fn can_go_back(self) -> bool {
+        self.back
+    }
+
+    pub fn can_go_forward(self) -> bool {
+        self.forward
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NavState
+// ---------------------------------------------------------------------------
 
 /// Full state of the navigation bar, owned by the main loop.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct NavState {
-    pub url: String,
-    pub can_go_back: bool,
-    pub can_go_forward: bool,
-    /// Cursor position within the URL field (char index), or `None` when
-    /// the field is not focused.
+    /// The committed, validated URL shown in the address bar.
+    pub url: Url,
+    /// In-flight edit buffer while the user is typing; `None` when the
+    /// address bar is not focused.
+    pub staged: Option<String>,
+    pub nav: NavigationCapability,
+    /// Cursor position within the URL field (char index).
     pub cursor: Option<usize>,
 }
 
+impl Default for NavState {
+    fn default() -> Self {
+        Self {
+            // about:blank is always valid — unwrap is safe.
+            url: Url::parse("about:blank").unwrap(),
+            staged: None,
+            nav: NavigationCapability::default(),
+            cursor: None,
+        }
+    }
+}
+
 impl NavState {
-    pub fn keypress(&mut self, char: u8, alt: bool, meta: bool) -> NavAction {
+    /// Returns the string currently shown in the address bar:
+    /// the staged edit if one is in progress, otherwise the committed URL.
+    fn displayed_url(&self) -> &str {
+        self.staged.as_deref().unwrap_or(self.url.as_str())
+    }
+
+    pub fn keypress(
+        &mut self,
+        logical: &crate::input::LogicalKey,
+        alt: bool,
+        meta: bool,
+    ) -> NavAction {
+        use crate::input::LogicalKey;
+
         let modifier = if cfg!(target_os = "macos") { meta } else { alt };
 
         match self.cursor {
-            None => match (modifier, char) {
-                (true, 0x14) => NavAction::GoBack,
-                (true, 0x13) => NavAction::GoForward,
+            None => match (modifier, logical) {
+                (true, LogicalKey::ArrowLeft) => NavAction::GoBack,
+                (true, LogicalKey::ArrowRight) => NavAction::GoForward,
                 _ => NavAction::Forward,
             },
             Some(cursor) => {
-                match char {
-                    0x0d => return NavAction::GoTo(self.url.clone()),
-                    0x11 => self.cursor = Some(0),
-                    0x12 => self.cursor = Some(self.url.width()),
-                    0x13 => self.cursor = Some((cursor + 1).min(self.url.width())),
-                    0x14 => self.cursor = Some(cursor.saturating_sub(1)),
-                    0x7f if cursor > 0 && cursor <= self.url.len() => {
-                        self.url.remove(cursor - 1);
-                        self.cursor = Some(cursor - 1);
+                match logical {
+                    LogicalKey::Enter => {
+                        let raw = self.displayed_url().to_owned();
+                        self.staged = None;
+                        self.cursor = None;
+                        return NavAction::GoTo(raw);
                     }
-                    c if (0x20..0x7f).contains(&c) => {
-                        self.url.insert(cursor, c as char);
-                        self.cursor = Some((cursor + 1).min(self.url.width()));
+                    LogicalKey::ArrowUp => self.cursor = Some(0),
+                    LogicalKey::ArrowDown => {
+                        self.cursor = Some(self.displayed_url().width());
+                    }
+                    LogicalKey::ArrowRight => {
+                        self.cursor = Some((cursor + 1).min(self.displayed_url().width()));
+                    }
+                    LogicalKey::ArrowLeft => {
+                        self.cursor = Some(cursor.saturating_sub(1));
+                    }
+                    LogicalKey::Backspace if cursor > 0 => {
+                        let buf = self
+                            .staged
+                            .get_or_insert_with(|| self.url.as_str().to_owned());
+                        if cursor <= buf.len() {
+                            buf.remove(cursor - 1);
+                            self.cursor = Some(cursor - 1);
+                        }
+                    }
+                    LogicalKey::Char(c) if (*c as u8) >= 0x20 => {
+                        let buf = self
+                            .staged
+                            .get_or_insert_with(|| self.url.as_str().to_owned());
+                        buf.insert(cursor, *c);
+                        self.cursor = Some((cursor + 1).min(buf.width()));
                     }
                     _ => {}
                 }
@@ -53,52 +145,74 @@ impl NavState {
     pub fn mouse_down(&mut self, col: u16, row: u16) -> NavAction {
         if row != 0 {
             self.cursor = None;
+            self.staged = None;
             return NavAction::Forward;
         }
 
         self.cursor = None;
+        self.staged = None;
 
-        match col {
-            0..=2 => NavAction::GoBack,
-            3..=5 => NavAction::GoForward,
-            6..=8 => NavAction::Refresh,
-            11.. => {
-                let offset = (col as usize).saturating_sub(11);
-                self.cursor = Some(offset.min(self.url.width()));
-                NavAction::Ignore
-            }
-            _ => NavAction::Ignore,
+        if BTN_BACK_COLS.contains(&col) {
+            return NavAction::GoBack;
         }
+        if BTN_FORWARD_COLS.contains(&col) {
+            return NavAction::GoForward;
+        }
+        if BTN_RELOAD_COLS.contains(&col) {
+            return NavAction::Refresh;
+        }
+        if col >= URL_FIELD_START {
+            let offset = (col as usize).saturating_sub(URL_FIELD_START as usize);
+            self.cursor = Some(offset.min(self.url.as_str().width()));
+            // Populate the staging buffer so edits don't start from blank.
+            self.staged = Some(self.url.as_str().to_owned());
+            return NavAction::Ignore;
+        }
+
+        NavAction::Ignore
     }
 
     pub fn mouse_up(&mut self, _col: u16, row: u16) -> NavAction {
         if row != 0 {
             self.cursor = None;
+            self.staged = None;
             NavAction::Forward
         } else {
             NavAction::Ignore
         }
     }
 
-    pub fn push(&mut self, url: &str, can_go_back: bool, can_go_forward: bool) {
+    /// Update the committed URL and navigation capability after a navigation event.
+    pub fn push(&mut self, url: Url, nav: NavigationCapability) {
+        // If there's an active staged edit that differs from the incoming URL,
+        // move the cursor to end-of-field so the user sees the new URL fully.
         if self.cursor.is_some() && self.url != url {
-            self.cursor = Some(url.len());
+            self.cursor = Some(url.as_str().len());
         }
-        self.url = url.to_owned();
-        self.can_go_back = can_go_back;
-        self.can_go_forward = can_go_forward;
+        self.url = url;
+        self.staged = None;
+        self.nav = nav;
     }
 }
+
+// ---------------------------------------------------------------------------
+// NavAction
+// ---------------------------------------------------------------------------
 
 #[derive(Debug)]
 pub enum NavAction {
     Ignore,
     Forward,
+    /// Raw string entered by the user; caller is responsible for URL parsing.
     GoTo(String),
     GoBack,
     GoForward,
     Refresh,
 }
+
+// ---------------------------------------------------------------------------
+// NavWidget
+// ---------------------------------------------------------------------------
 
 pub struct NavWidget<'a> {
     state: &'a NavState,
@@ -110,7 +224,7 @@ impl<'a> NavWidget<'a> {
     }
 
     pub fn cursor_position(&self, area: Rect) -> Option<(u16, u16)> {
-        let col = 11 + self.state.cursor? as u16;
+        let col = URL_FIELD_START + self.state.cursor? as u16;
         Some((area.x + col.min(area.width.saturating_sub(1)), area.y))
     }
 }
@@ -124,8 +238,9 @@ impl Widget for NavWidget<'_> {
         let active = Style::new().fg(Color::Black).bg(Color::White);
         let inactive = Style::new().fg(Color::DarkGray).bg(Color::White);
 
-        let url_space = (area.width.saturating_sub(13)) as usize;
-        let url_display: String = self.state.url.chars().take(url_space).collect();
+        let url_space = (area.width.saturating_sub(URL_FIELD_START + 2)) as usize;
+        let displayed = self.state.displayed_url();
+        let url_display: String = displayed.chars().take(url_space).collect();
         let url_width = url_display.width();
         let padded = format!(" {}{} ", url_display, " ".repeat(url_space - url_width));
 
@@ -141,17 +256,13 @@ impl Widget for NavWidget<'_> {
             }
         };
 
-        btn(buf, &mut x, "\u{276e}", self.state.can_go_back);
-        btn(buf, &mut x, "\u{276f}", self.state.can_go_forward);
+        btn(buf, &mut x, "‹", self.state.nav.can_go_back());
+        btn(buf, &mut x, "›", self.state.nav.can_go_forward());
         btn(buf, &mut x, "↻", true);
         btn(buf, &mut x, &padded, true);
 
-        while x < area.x + area.width {
-            buf.cell_mut((x, y))
-                .unwrap()
-                .set_char(' ')
-                .set_style(active);
-            x += 1;
+        for x in x..area.x + area.width {
+            buf[(x, y)].set_char(' ').set_style(active);
         }
     }
 }

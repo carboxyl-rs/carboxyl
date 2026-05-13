@@ -47,7 +47,7 @@ The build is now a normal Cargo build for the `carboxyl` binary. The first build
 
 ## Runtime Architecture
 
-- `src/browser/servo_runtime.rs` owns the browser runtime.
+- `browser::servo` owns the browser runtime.
 - Servo is embedded through `ServoBuilder`, `WebViewBuilder`, and `SoftwareRenderingContext`.
 - Terminal input (by crossterm) is translated directly into Servo input events.
 - Output is being handled with ratatui.
@@ -60,9 +60,7 @@ The build is now a normal Cargo build for the `carboxyl` binary. The first build
   * Test for unrendered text
   * Performance optimization (on native text)
 
-* Main keys are working but it'd be better if every single key were sent to servo exactly as they are; like (ctrl, shift) alone and combinations
-
-* Consider reviewing --resolution implementation; it'd be better to have --zoom where -r 400 defaults to --zoom 100 (as a percentage): just like mordern gui browsers.
+* (KB/input refactor IN PROGRESS) Main keys are working but it'd be better if every single key were sent to servo exactly as they are; like (ctrl, shift) alone and combinations
 
 * A fancy browser ui (as ratatui is already implemented)
 
