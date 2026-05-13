@@ -21,7 +21,7 @@ pub struct Cli {
     /// Lower values zoom out and show more content at once.
     #[arg(short = 's', long = "scale", default_value_t = 100)]
     // resize in runtime with alacritty ctrl +/-, not a _feature_ though
-    pub scale: u32,
+    pub scale: u16,
 
     /// Disable native terminal text rendering.
     /// By default, text is extracted from the page and rendered using the

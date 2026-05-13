@@ -1,22 +1,32 @@
-use carboxyl::browser::AppResult;
+use clap::Parser;
+use color_eyre::eyre::Result;
+
+use carboxyl::browser::run;
+use carboxyl::browser::{BrowserConfig, BrowserRuntime};
 use carboxyl::cli::Cli;
 use carboxyl::output::restore_terminal;
-use clap::Parser;
 
-fn main() -> AppResult<()> {
-    // Register fatal signal handlers before anything touches the terminal.
-    // These restore the terminal on SIGSEGV/SIGBUS/SIGABRT/SIGILL so the
-    // shell isn't left in raw mode after a crash.
-    if let Err(e) = carboxyl::platform::signal::register() {
-        eprintln!("warning: failed to register signal handlers: {e}");
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
+    if let Err(err) = carboxyl::platform::signal::register() {
+        eprintln!("warning: failed to register signal handlers: {err}");
     }
 
     let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
+    std::panic::set_hook(Box::new(move |panic_info| {
         restore_terminal();
-        default_hook(info);
+        default_hook(panic_info);
     }));
 
     let cli = Cli::parse();
-    carboxyl::browser::run(cli)
+    let cfg = BrowserConfig::from_cli(&cli)?;
+    let (runtime, channels) = BrowserRuntime::spawn(&cfg)?;
+
+    run(channels, &cfg)?;
+
+    // `runtime` drops here, joining the servo thread and restoring the terminal.
+    drop(runtime);
+
+    Ok(())
 }

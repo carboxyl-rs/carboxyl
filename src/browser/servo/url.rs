@@ -3,9 +3,9 @@ use std::path::Path;
 
 use url::Url;
 
-use super::event_loop::AppResult;
+use color_eyre::eyre::Result;
 
-pub fn normalize_url(raw: Option<String>) -> AppResult<Url> {
+pub fn normalize_url(raw: Option<String>) -> Result<Url> {
     let Some(raw) = raw else {
         return Ok(Url::parse("about:blank")?);
     };
