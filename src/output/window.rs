@@ -38,8 +38,17 @@ impl Window {
         let cols = ws_col.max(1) as u32;
         let rows = ws_row.max(2) as u32 - 1;
 
-        let zoom = cli.scale as f32 / 100.0;
-        let scale = Vec2::new(2.0 * zoom, 4.0 * zoom);
+        // Browser-style zoom semantics:
+        //
+        // Higher zoom percentage => larger content => smaller viewport.
+        //
+        // 100% is calibrated to roughly the old 325%.
+        let zoom = (cli.scale.max(1) as f32) / 100.0;
+
+        let base = Vec2::new(6.5, 13.0);
+
+        // Divide instead of multiply so increasing zoom enlarges content.
+        let scale = base / zoom;
 
         self.cells = UVec2::new(cols, rows);
         self.cell_pixels = scale;

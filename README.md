@@ -60,7 +60,7 @@ The build is now a normal Cargo build for the `carboxyl` binary. The first build
   * Test for unrendered text
   * Performance optimization (on native text)
 
-* A fancy browser ui (as ratatui is already implemented)
+* A fancy browser ui and more features (history, cookies*, tabs, etc)
 
 * Optional hi-res terminal graphics (Sixel / Kitty)
 

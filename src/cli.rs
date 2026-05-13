@@ -16,11 +16,11 @@ pub struct Cli {
     #[arg(short = 'f', long = "fps", default_value_t = 60)]
     pub fps: u16,
 
-    /// Viewport scale as a percentage (100 = default).
-    /// Increase with Super+/Ctrl++ or decrease with Super-/Ctrl+- at runtime.
-    /// Higher values render more pixels per terminal cell before downsampling;
-    /// lower values trade sharpness for performance.
+    /// Browser zoom percentage (100 = default).
+    /// Higher values zoom in and make page content larger.
+    /// Lower values zoom out and show more content at once.
     #[arg(short = 's', long = "scale", default_value_t = 100)]
+    // resize in runtime with alacritty ctrl +/-, not a _feature_ though
     pub scale: u32,
 
     /// Disable native terminal text rendering.
