@@ -1,3 +1,5 @@
+// src/browser/servo/session.rs
+
 mod app_state;
 mod dispatch;
 mod render;
@@ -7,7 +9,7 @@ use std::io::{self, Write};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, WrapErr};
 use ratatui::DefaultTerminal;
 
 use super::BrowserConfig;
@@ -17,6 +19,8 @@ use super::geometry::physical_size;
 pub use app_state::AppState;
 pub use timing::{RenderConfig, TimingState};
 
+// How long to block waiting for events before doing an idle tick.
+// Sets the floor for repaint latency when the event stream goes quiet.
 const IDLE_TIMEOUT: Duration = Duration::from_millis(50);
 
 // ---------------------------------------------------------------------------
@@ -72,7 +76,10 @@ impl Session {
             match self.event_rx.recv_timeout(IDLE_TIMEOUT) {
                 Ok(ev) => self.handle_event(ev)?,
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    log::error!("event channel disconnected — servo thread may have crashed");
+                    break;
+                }
             }
 
             self.maybe_paint()?;
@@ -84,12 +91,14 @@ impl Session {
     fn handle_event(&mut self, ev: RuntimeEvent) -> Result<()> {
         match ev {
             RuntimeEvent::Input(event) => {
-                let is_scroll = dispatch::handle_input(event, &self.servo_tx, &mut self.app)?;
+                let is_scroll = dispatch::handle_input(event, &self.servo_tx, &mut self.app)
+                    .wrap_err("failed to handle input event")?;
                 let batch_scroll =
-                    dispatch::drain_pending_inputs(&self.event_rx, &self.servo_tx, &mut self.app)?;
+                    dispatch::drain_pending_inputs(&self.event_rx, &self.servo_tx, &mut self.app)
+                        .wrap_err("failed to drain pending input events")?;
 
                 if (is_scroll || batch_scroll) && self.cfg.native_text {
-                    self.request_extract();
+                    self.schedule_extract();
                 }
 
                 self.app.mark_dirty();
@@ -97,22 +106,27 @@ impl Session {
 
             RuntimeEvent::Wake => {
                 if self.timing.paint_cmd_due(self.cfg.frame_budget) {
-                    let _ = self.servo_tx.try_send(ServoCommand::Paint);
+                    if self.servo_tx.try_send(ServoCommand::Paint).is_err() {
+                        log::trace!("paint command dropped — servo channel at capacity");
+                    }
                     self.timing.mark_paint_cmd();
                 }
                 if self.cfg.native_text && self.timing.extract_due() {
-                    self.request_extract();
+                    self.schedule_extract();
                 }
             }
 
             RuntimeEvent::Resize(cols, rows) => {
-                if let Some(new_window) = self.app.apply_resize(cols, rows) {
-                    let _ = self
+                if let Some(new_window) = self.app.apply_resize(cols, rows)
+                    && self
                         .servo_tx
-                        .try_send(ServoCommand::Resize(physical_size(new_window.browser)));
+                        .try_send(ServoCommand::Resize(physical_size(new_window.browser)))
+                        .is_err()
+                {
+                    log::trace!("resize command dropped — servo channel at capacity");
                 }
                 if self.cfg.native_text && self.timing.extract_due() {
-                    self.request_extract();
+                    self.schedule_extract();
                 }
             }
 
@@ -134,7 +148,7 @@ impl Session {
 
             RuntimeEvent::TextExtractRequested => {
                 if self.cfg.native_text {
-                    self.request_extract();
+                    self.schedule_extract();
                 }
             }
 
@@ -153,8 +167,10 @@ impl Session {
         Ok(())
     }
 
-    fn request_extract(&mut self) {
-        let _ = self.servo_tx.try_send(ServoCommand::ExtractText);
+    fn schedule_extract(&mut self) {
+        if self.servo_tx.try_send(ServoCommand::ExtractText).is_err() {
+            log::trace!("extract command dropped — servo channel at capacity");
+        }
         self.timing.mark_extracted();
     }
 }

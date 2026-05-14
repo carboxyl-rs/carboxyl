@@ -1,3 +1,5 @@
+// src/browser/servo.rs
+
 mod delegates;
 mod events;
 mod geometry;
@@ -14,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, eyre};
 use crossterm::event::{
     EnableMouseCapture, KeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
@@ -53,9 +55,11 @@ pub struct BrowserConfig {
 }
 
 impl BrowserConfig {
-    pub fn from_cli(cli: &Cli) -> Result<Self> {
+    /// `log_path` must be initialised before this call — use
+    /// `logger::init_logger` in `main` and pass the result in.
+    pub fn from_cli(cli: &Cli, log_path: Option<PathBuf>) -> Result<Self> {
         Ok(Self {
-            log_path: logger::init_logger(cli)?,
+            log_path,
             window: Window::read(cli),
             true_color: u32::from(crossterm::style::available_color_count()) >= TRUE_COLOR_COUNT,
             native_text: !cli.no_native_text,
@@ -73,13 +77,15 @@ pub struct BrowserRuntime {
     servo_tx: mpsc::SyncSender<events::ServoCommand>,
     servo_handle: Option<thread::JoinHandle<()>>,
     log_path: Option<PathBuf>,
-    _signal: thread::JoinHandle<()>,
-    _input: thread::JoinHandle<()>,
+    // Prefixed with `_` because these are held purely for their Drop side-effect
+    // (keeping the threads alive). They are never read after construction.
+    _signal_handle: thread::JoinHandle<()>,
+    _input_handle: thread::JoinHandle<()>,
 }
 
 impl BrowserRuntime {
     pub fn spawn(cfg: &BrowserConfig) -> Result<(Self, Channels)> {
-        ensure_rustls_provider_installed();
+        install_rustls_provider()?;
 
         let (event_tx, event_rx) =
             mpsc::sync_channel::<events::RuntimeEvent>(EVENT_CHANNEL_CAPACITY);
@@ -125,8 +131,8 @@ impl BrowserRuntime {
             servo_tx: servo_tx.clone(),
             servo_handle: Some(servo_handle),
             log_path: cfg.log_path.clone(),
-            _signal: signal_thread::spawn_signal_thread(event_tx.clone()),
-            _input: input_thread::spawn_input_thread(event_tx),
+            _signal_handle: signal_thread::spawn_signal_thread(event_tx.clone()),
+            _input_handle: input_thread::spawn_input_thread(event_tx),
         };
 
         Ok((
@@ -142,7 +148,9 @@ impl BrowserRuntime {
 
 impl Drop for BrowserRuntime {
     fn drop(&mut self) {
-        let _ = self.servo_tx.try_send(events::ServoCommand::Shutdown);
+        // Blocking send is intentional: we must deliver Shutdown before joining.
+        // The channel will drain quickly as Servo processes its queue.
+        let _ = self.servo_tx.send(events::ServoCommand::Shutdown);
 
         if let Some(handle) = self.servo_handle.take() {
             let _ = handle.join();
@@ -155,8 +163,11 @@ impl Drop for BrowserRuntime {
 
 // ---------------------------------------------------------------------------
 
-fn ensure_rustls_provider_installed() {
+fn install_rustls_provider() -> Result<()> {
     if CryptoProvider::get_default().is_none() {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .map_err(|_| eyre!("failed to install rustls crypto provider"))?;
     }
+    Ok(())
 }

@@ -1,8 +1,7 @@
 use clap::Parser;
 use color_eyre::eyre::Result;
 
-use carboxyl::browser::run;
-use carboxyl::browser::{BrowserConfig, BrowserRuntime};
+use carboxyl::browser::{BrowserConfig, BrowserRuntime, run};
 use carboxyl::cli::Cli;
 use carboxyl::output::restore_terminal;
 
@@ -20,13 +19,12 @@ fn main() -> Result<()> {
     }));
 
     let cli = Cli::parse();
-    let cfg = BrowserConfig::from_cli(&cli)?;
-    let (runtime, channels) = BrowserRuntime::spawn(&cfg)?;
+    let log_path = carboxyl::logger::init_logger(&cli)?;
+    let cfg = BrowserConfig::from_cli(&cli, log_path)?;
+    let (_runtime, channels) = BrowserRuntime::spawn(&cfg)?;
 
     run(channels, &cfg)?;
 
     // `runtime` drops here, joining the servo thread and restoring the terminal.
-    drop(runtime);
-
     Ok(())
 }
