@@ -11,24 +11,37 @@ use url::Url;
 use servo::{Key as ServoKey, Modifiers as ServoModifiers, NamedKey};
 
 // ---------------------------------------------------------------------------
-// Layout constants
+// Button layout constants
 // ---------------------------------------------------------------------------
+//
+// The navigation bar is laid out left-to-right as:
+//
+//   [‹]  [›]  [↻]  <space><space>  [ url field ]
+//    0-2  3-5  6-8  9-10            11 …
+//
+// Each button is three columns wide: "[", glyph, "]".
+
+const BTN_WIDTH: u16 = 3;
+
+const BTN_BACK_START: u16 = 0;
+const BTN_FORWARD_START: u16 = BTN_BACK_START + BTN_WIDTH;
+const BTN_RELOAD_START: u16 = BTN_FORWARD_START + BTN_WIDTH;
+
+const BTN_BACK_COLS: std::ops::RangeInclusive<u16> =
+    BTN_BACK_START..=BTN_BACK_START + BTN_WIDTH - 1;
+const BTN_FORWARD_COLS: std::ops::RangeInclusive<u16> =
+    BTN_FORWARD_START..=BTN_FORWARD_START + BTN_WIDTH - 1;
+const BTN_RELOAD_COLS: std::ops::RangeInclusive<u16> =
+    BTN_RELOAD_START..=BTN_RELOAD_START + BTN_WIDTH - 1;
+
+/// Two-column spacer between the reload button and the URL field.
+const URL_FIELD_PADDING: u16 = 2;
 
 /// Column at which the URL input field begins.
-///
-/// Derived from button widths:
-///   [‹] = 3 cols  (col 0–2)
-///   [›] = 3 cols  (col 3–5)
-///   [↻] = 3 cols  (col 6–8)
-///   "  " separator = 2 cols  (col 9–10)
-///
-/// Total prefix = 11 cols.
-const URL_FIELD_START: u16 = 11;
+const URL_FIELD_START: u16 = BTN_RELOAD_START + BTN_WIDTH + URL_FIELD_PADDING;
 
-/// Hit-test regions for the navigation bar buttons (inclusive column ranges).
-const BTN_BACK_COLS: std::ops::RangeInclusive<u16> = 0..=2;
-const BTN_FORWARD_COLS: std::ops::RangeInclusive<u16> = 3..=5;
-const BTN_RELOAD_COLS: std::ops::RangeInclusive<u16> = 6..=8;
+/// Padding columns consumed by the URL field's own leading and trailing spaces.
+const URL_FIELD_INNER_PADDING: u16 = 2;
 
 // ---------------------------------------------------------------------------
 // Navigation capability flags
@@ -97,9 +110,7 @@ impl NavState {
         match self.cursor {
             None => match (modifier, key) {
                 (true, ServoKey::Named(NamedKey::ArrowLeft)) => NavAction::GoBack,
-
                 (true, ServoKey::Named(NamedKey::ArrowRight)) => NavAction::GoForward,
-
                 _ => NavAction::Forward,
             },
 
@@ -109,7 +120,6 @@ impl NavState {
                         let raw = self.displayed_url().to_owned();
                         self.staged = None;
                         self.cursor = None;
-
                         return NavAction::GoTo(raw);
                     }
 
@@ -159,7 +169,6 @@ impl NavState {
                                 .get_or_insert_with(|| self.url.as_str().to_owned());
 
                             buf.insert(cursor, ch);
-
                             self.cursor = Some((cursor + 1).min(buf.width()));
                         }
                     }
@@ -268,7 +277,10 @@ impl Widget for NavWidget<'_> {
         let active = Style::new().fg(Color::Black).bg(Color::White);
         let inactive = Style::new().fg(Color::DarkGray).bg(Color::White);
 
-        let url_space = (area.width.saturating_sub(URL_FIELD_START + 2)) as usize;
+        let url_space = (area
+            .width
+            .saturating_sub(URL_FIELD_START + URL_FIELD_INNER_PADDING))
+            as usize;
         let displayed = self.state.displayed_url();
         let url_display: String = displayed.chars().take(url_space).collect();
         let url_width = url_display.width();

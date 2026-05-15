@@ -21,6 +21,41 @@ use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
 
 // ---------------------------------------------------------------------------
+// Luma / contrast constants
+// ---------------------------------------------------------------------------
+
+// BT.601 integer luma coefficients scaled by 256.
+// Exact: 0.299*256=76.544, 0.587*256=150.272, 0.114*256=29.184 — rounded.
+// A white pixel yields MAX_LUMA; a black pixel yields 0.
+const LUMA_R: u32 = 77;
+const LUMA_G: u32 = 150;
+const LUMA_B: u32 = 29;
+
+/// Maximum luma value (white: 255 × (77 + 150 + 29) = 255 × 256 = 65_280).
+const MAX_LUMA: u32 = 255 * (LUMA_R + LUMA_G + LUMA_B);
+
+/// Minimum luma difference required to consider fg/bg contrast acceptable.
+/// Empirically chosen on the 0–MAX_LUMA scale.
+const MIN_CONTRAST: u32 = 6_000;
+
+/// Luma threshold for the black-vs-white fallback. Half of MAX_LUMA.
+const MID_LUMA: u32 = MAX_LUMA / 2;
+
+// ---------------------------------------------------------------------------
+// 6×6×6 colour cube constants (xterm 256-colour)
+// ---------------------------------------------------------------------------
+
+/// First index of the 6×6×6 colour cube in the xterm 256-colour palette.
+const CUBE_BASE: u8 = 16;
+
+/// Number of steps per channel in the cube (0–5).
+const CUBE_STEPS: u8 = 6;
+
+/// Divisor to map a u8 channel value into a 0–5 cube index.
+/// 256 / 6 ≈ 42.67, so 43 gives the right bucket boundaries.
+const CUBE_CHANNEL_DIVISOR: u8 = 43;
+
+// ---------------------------------------------------------------------------
 // Data model
 // ---------------------------------------------------------------------------
 
@@ -98,6 +133,7 @@ fn f32_field(map: &std::collections::HashMap<String, JSValue>, key: &str) -> Opt
 }
 
 /// Parse CSS `rgb(r, g, b)` or `rgba(r, g, b, a)`.
+///
 /// After text suppression, computed color will be `rgba(r, g, b, 0)` —
 /// the RGB channels still carry the original color, so we read them as-is
 /// and discard the alpha component entirely.
@@ -253,38 +289,61 @@ fn to_terminal_color((r, g, b): (u8, u8, u8), true_color: bool) -> Color {
     if true_color {
         Color::Rgb(r, g, b)
     } else {
-        let q = |v: u8| (v / 43).min(5);
-        Color::Indexed(16 + q(r) * 36 + q(g) * 6 + q(b))
+        let q = |v: u8| (v / CUBE_CHANNEL_DIVISOR).min(CUBE_STEPS - 1);
+        Color::Indexed(CUBE_BASE + q(r) * CUBE_STEPS * CUBE_STEPS + q(g) * CUBE_STEPS + q(b))
     }
 }
 
 /// Ensure adequate contrast between fg and bg.
 /// Falls back to black or white based on background luminance.
 fn ensure_contrast(fg: Color, bg: Color) -> Color {
-    let (fr, fg_c, fb) = rgb_of(fg);
-    let (br, bg_c, bb) = rgb_of(bg);
+    let (fr, fg_g, fb) = rgb_of(fg);
+    let (br, bg_g, bb) = rgb_of(bg);
 
-    let fg_luma = fr as u32 * 77 + fg_c as u32 * 150 + fb as u32 * 29;
-    let bg_luma = br as u32 * 77 + bg_c as u32 * 150 + bb as u32 * 29;
+    let fg_luma = fr as u32 * LUMA_R + fg_g as u32 * LUMA_G + fb as u32 * LUMA_B;
+    let bg_luma = br as u32 * LUMA_R + bg_g as u32 * LUMA_G + bb as u32 * LUMA_B;
 
-    if fg_luma.abs_diff(bg_luma) >= 6000 {
+    if fg_luma.abs_diff(bg_luma) >= MIN_CONTRAST {
         return fg;
     }
 
-    if bg_luma > 32768 {
+    if bg_luma > MID_LUMA {
         Color::Black
     } else {
         Color::White
     }
 }
 
+/// Decompose any ratatui `Color` into its `(r, g, b)` triple.
+///
+/// Named terminal colors are mapped to their conventional ANSI RGB values.
+/// `Color::Reset` and indexed colors outside the 6×6×6 cube are treated as
+/// mid-grey, which keeps contrast logic conservative rather than silent.
 fn rgb_of(color: Color) -> (u8, u8, u8) {
     match color {
         Color::Rgb(r, g, b) => (r, g, b),
+
+        // Standard ANSI named colors (conventional sRGB approximations).
         Color::Black => (0, 0, 0),
+        Color::Red => (170, 0, 0),
+        Color::Green => (0, 170, 0),
+        Color::Yellow => (170, 85, 0),
+        Color::Blue => (0, 0, 170),
+        Color::Magenta => (170, 0, 170),
+        Color::Cyan => (0, 170, 170),
+        Color::Gray => (170, 170, 170),
+        Color::DarkGray => (85, 85, 85),
+        Color::LightRed => (255, 85, 85),
+        Color::LightGreen => (85, 255, 85),
+        Color::LightYellow => (255, 255, 85),
+        Color::LightBlue => (85, 85, 255),
+        Color::LightMagenta => (255, 85, 255),
+        Color::LightCyan => (85, 255, 255),
         Color::White => (255, 255, 255),
-        Color::Reset => (128, 128, 128),
-        _ => (128, 128, 128),
+
+        // Indexed and Reset: conservatively mid-grey so contrast check errs
+        // toward the black/white fallback rather than passing an unknown color.
+        Color::Indexed(_) | Color::Reset => (128, 128, 128),
     }
 }
 
