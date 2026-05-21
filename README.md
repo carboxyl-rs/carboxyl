@@ -68,6 +68,7 @@ The build is now a normal Cargo build for the `carboxyl` binary. The first build
 
 ## Notes
 
+- While this is in the 'servo-dev' branch, discuss on #16.
 - Please build only with --release, otherwise you may get panics on runtime. Release builds might take some time, but way less than compiling chromium.
 - Servo evolves quickly. If Cargo resolution or toolchain requirements drift, align the local toolchain with upstream Servo and refresh the lockfile.
 - Legacy Chromium files may still exist in older branches or release artifacts, but they are no longer part of the supported runtime path in this branch.

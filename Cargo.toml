@@ -15,7 +15,7 @@ crossterm = "0.29"
 unicode-width = "0.2"
 log = "0.4"
 simplelog = "0.12"
-glam = "0.32"
+glam = "0.33"
 signal-hook = "0.4"
 color-eyre = "0.6"
 
