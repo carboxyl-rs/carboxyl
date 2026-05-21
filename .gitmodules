@@ -1,3 +1,0 @@
-[submodule "chromium/depot_tools"]
-	path = chromium/depot_tools
-	url = https://chromium.googlesource.com/chromium/tools/depot_tools.git
