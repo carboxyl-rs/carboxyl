@@ -87,9 +87,7 @@ pub fn servo_thread(
 ) {
     let servo = ServoBuilder::default()
         .preferences(browser_preferences(Preferences::default()))
-        .event_loop_waker(Box::new(ServoWaker {
-            tx: servo_tx.clone(),
-        }))
+        .event_loop_waker(Box::new(ServoWaker::new(servo_tx.clone())))
         .build();
 
     servo.set_delegate(Rc::new(TerminalServoDelegate));

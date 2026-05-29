@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use color_eyre::eyre::{Result, WrapErr};
+use color_eyre::eyre::Result;
 use ratatui::DefaultTerminal;
 
 use super::BrowserConfig;
@@ -19,8 +19,8 @@ use super::geometry::physical_size;
 pub use app_state::AppState;
 pub use timing::{RenderConfig, TimingState};
 
-// How long to block waiting for events before doing an idle tick.
-// Sets the floor for repaint latency when the event stream goes quiet.
+/// How long to block waiting for events before doing an idle tick.
+/// Sets the floor for repaint latency when the event stream goes quiet.
 const IDLE_TIMEOUT: Duration = Duration::from_millis(50);
 
 // ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ impl Session {
     fn run(&mut self) -> Result<()> {
         while self.app.running {
             match self.event_rx.recv_timeout(IDLE_TIMEOUT) {
-                Ok(ev) => self.handle_event(ev)?,
+                Ok(ev) => self.handle_event(ev),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
                     log::error!("event channel disconnected — servo thread may have crashed");
@@ -88,14 +88,12 @@ impl Session {
         Ok(())
     }
 
-    fn handle_event(&mut self, ev: RuntimeEvent) -> Result<()> {
+    fn handle_event(&mut self, ev: RuntimeEvent) {
         match ev {
             RuntimeEvent::Input(event) => {
-                let is_scroll = dispatch::handle_input(event, &self.servo_tx, &mut self.app)
-                    .wrap_err("failed to handle input event")?;
+                let is_scroll = dispatch::handle_input(event, &self.servo_tx, &mut self.app);
                 let batch_scroll =
-                    dispatch::drain_pending_inputs(&self.event_rx, &self.servo_tx, &mut self.app)
-                        .wrap_err("failed to drain pending input events")?;
+                    dispatch::drain_pending_inputs(&self.event_rx, &self.servo_tx, &mut self.app);
 
                 if (is_scroll || batch_scroll) && self.cfg.native_text {
                     self.schedule_extract();
@@ -154,8 +152,6 @@ impl Session {
 
             RuntimeEvent::Exit => self.app.stop(),
         }
-
-        Ok(())
     }
 
     fn maybe_paint(&mut self) -> Result<()> {

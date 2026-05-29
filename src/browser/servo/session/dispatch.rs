@@ -1,6 +1,5 @@
 use std::sync::mpsc;
 
-use color_eyre::eyre::Result;
 use log::warn;
 use servo::{
     InputEvent, MouseButton, MouseButtonAction, MouseButtonEvent, MouseMoveEvent, WheelDelta,
@@ -25,7 +24,7 @@ pub fn handle_input(
     event: input::Event,
     servo_tx: &mpsc::SyncSender<ServoCommand>,
     app: &mut AppState,
-) -> Result<bool> {
+) -> bool {
     let is_scroll = matches!(event, input::Event::Scroll { .. });
 
     match event {
@@ -39,7 +38,7 @@ pub fn handle_input(
                 .keyboard(&key_event.event.key, key_event.event.modifiers);
 
             let forward = matches!(action, NavAction::Forward);
-            dispatch_nav(action, servo_tx)?;
+            dispatch_nav(action, servo_tx);
 
             if forward {
                 let _ = servo_tx.try_send(ServoCommand::Input(InputEvent::Keyboard(key_event)));
@@ -104,7 +103,7 @@ pub fn handle_input(
 
                 let _ = servo_tx.try_send(ServoCommand::Input(ev));
             } else {
-                dispatch_nav(nav_action, servo_tx)?;
+                dispatch_nav(nav_action, servo_tx);
             }
         }
 
@@ -117,30 +116,36 @@ pub fn handle_input(
         }
     }
 
-    Ok(is_scroll)
+    is_scroll
 }
 
 /// Drain all immediately-available input events from the channel, dispatching
 /// each one. Returns `true` if any of them was a scroll event.
+///
+/// Only `RuntimeEvent::Input` events are consumed; any other event type left
+/// in the channel is left for the main loop to process on the next iteration.
 pub fn drain_pending_inputs(
     event_rx: &mpsc::Receiver<RuntimeEvent>,
     servo_tx: &mpsc::SyncSender<ServoCommand>,
     app: &mut AppState,
-) -> Result<bool> {
+) -> bool {
     let mut any_scroll = false;
 
     while let Ok(RuntimeEvent::Input(event)) = event_rx.try_recv() {
-        any_scroll |= handle_input(event, servo_tx, app)?;
+        any_scroll |= handle_input(event, servo_tx, app);
     }
 
-    Ok(any_scroll)
+    any_scroll
 }
 
 // ---------------------------------------------------------------------------
 // Private
 // ---------------------------------------------------------------------------
 
-fn dispatch_nav(action: NavAction, servo_tx: &mpsc::SyncSender<ServoCommand>) -> Result<()> {
+/// Translate a navigation action into Servo commands or a URL load.
+/// URL parse errors are logged as warnings and otherwise ignored — there is
+/// no meaningful way to surface them to the user from this call site.
+fn dispatch_nav(action: NavAction, servo_tx: &mpsc::SyncSender<ServoCommand>) {
     match action {
         NavAction::Ignore | NavAction::Forward => {}
         NavAction::GoBack => {
@@ -159,5 +164,4 @@ fn dispatch_nav(action: NavAction, servo_tx: &mpsc::SyncSender<ServoCommand>) ->
             Err(e) => warn!("invalid URL: {e}"),
         },
     }
-    Ok(())
 }

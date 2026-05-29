@@ -6,7 +6,13 @@ use super::events::ServoCommand;
 
 #[derive(Clone)]
 pub struct ServoWaker {
-    pub tx: mpsc::SyncSender<ServoCommand>,
+    tx: mpsc::SyncSender<ServoCommand>,
+}
+
+impl ServoWaker {
+    pub fn new(tx: mpsc::SyncSender<ServoCommand>) -> Self {
+        Self { tx }
+    }
 }
 
 impl EventLoopWaker for ServoWaker {

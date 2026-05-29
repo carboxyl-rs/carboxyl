@@ -5,7 +5,7 @@ use servo::{
     Modifiers as ServoModifiers, NamedKey,
 };
 
-pub fn map_keyboard_event(event: KeyEvent) -> Option<ServoKeyboardEvent> {
+pub fn map_keyboard_event(event: KeyEvent) -> ServoKeyboardEvent {
     let modifiers = effective_modifiers(&event);
 
     let (key, code, location) = map_key_code(&event.code);
@@ -15,15 +15,15 @@ pub fn map_keyboard_event(event: KeyEvent) -> Option<ServoKeyboardEvent> {
         KeyEventKind::Release => KeyState::Up,
     };
 
-    Some(ServoKeyboardEvent::new_without_event(
+    ServoKeyboardEvent::new_without_event(
         state,
         key,
         code,
         location,
         map_modifiers(modifiers),
         matches!(event.kind, KeyEventKind::Repeat),
-        false,
-    ))
+        false, // is_composing
+    )
 }
 
 fn effective_modifiers(event: &KeyEvent) -> KeyModifiers {
@@ -172,17 +172,14 @@ fn map_key_code(code: &KeyCode) -> (ServoKey, Code, Location) {
 
         KeyCode::Char(c) => {
             let key = ServoKey::Character(c.to_string());
-
             let code = character_code(*c).unwrap_or(Code::Unidentified);
-
             (key, code, Location::Standard)
         }
 
-        KeyCode::F(n) => (
-            ServoKey::Named(function_named_key(*n)),
-            function_code(*n),
-            Location::Standard,
-        ),
+        KeyCode::F(n) => {
+            let (named, code) = function_key(*n);
+            (ServoKey::Named(named), code, Location::Standard)
+        }
 
         KeyCode::Modifier(modifier) => match modifier {
             crossterm::event::ModifierKeyCode::LeftShift => (
@@ -345,62 +342,34 @@ fn character_code(ch: char) -> Option<Code> {
     })
 }
 
-fn function_named_key(n: u8) -> NamedKey {
+/// Map a function key number (1–24) to its Servo `NamedKey` and `Code`.
+/// Numbers outside that range yield `Unidentified` for both fields.
+fn function_key(n: u8) -> (NamedKey, Code) {
     match n {
-        1 => NamedKey::F1,
-        2 => NamedKey::F2,
-        3 => NamedKey::F3,
-        4 => NamedKey::F4,
-        5 => NamedKey::F5,
-        6 => NamedKey::F6,
-        7 => NamedKey::F7,
-        8 => NamedKey::F8,
-        9 => NamedKey::F9,
-        10 => NamedKey::F10,
-        11 => NamedKey::F11,
-        12 => NamedKey::F12,
-        13 => NamedKey::F13,
-        14 => NamedKey::F14,
-        15 => NamedKey::F15,
-        16 => NamedKey::F16,
-        17 => NamedKey::F17,
-        18 => NamedKey::F18,
-        19 => NamedKey::F19,
-        20 => NamedKey::F20,
-        21 => NamedKey::F21,
-        22 => NamedKey::F22,
-        23 => NamedKey::F23,
-        24 => NamedKey::F24,
-        _ => NamedKey::Unidentified,
-    }
-}
-
-fn function_code(n: u8) -> Code {
-    match n {
-        1 => Code::F1,
-        2 => Code::F2,
-        3 => Code::F3,
-        4 => Code::F4,
-        5 => Code::F5,
-        6 => Code::F6,
-        7 => Code::F7,
-        8 => Code::F8,
-        9 => Code::F9,
-        10 => Code::F10,
-        11 => Code::F11,
-        12 => Code::F12,
-        13 => Code::F13,
-        14 => Code::F14,
-        15 => Code::F15,
-        16 => Code::F16,
-        17 => Code::F17,
-        18 => Code::F18,
-        19 => Code::F19,
-        20 => Code::F20,
-        21 => Code::F21,
-        22 => Code::F22,
-        23 => Code::F23,
-        24 => Code::F24,
-        _ => Code::Unidentified,
+        1 => (NamedKey::F1, Code::F1),
+        2 => (NamedKey::F2, Code::F2),
+        3 => (NamedKey::F3, Code::F3),
+        4 => (NamedKey::F4, Code::F4),
+        5 => (NamedKey::F5, Code::F5),
+        6 => (NamedKey::F6, Code::F6),
+        7 => (NamedKey::F7, Code::F7),
+        8 => (NamedKey::F8, Code::F8),
+        9 => (NamedKey::F9, Code::F9),
+        10 => (NamedKey::F10, Code::F10),
+        11 => (NamedKey::F11, Code::F11),
+        12 => (NamedKey::F12, Code::F12),
+        13 => (NamedKey::F13, Code::F13),
+        14 => (NamedKey::F14, Code::F14),
+        15 => (NamedKey::F15, Code::F15),
+        16 => (NamedKey::F16, Code::F16),
+        17 => (NamedKey::F17, Code::F17),
+        18 => (NamedKey::F18, Code::F18),
+        19 => (NamedKey::F19, Code::F19),
+        20 => (NamedKey::F20, Code::F20),
+        21 => (NamedKey::F21, Code::F21),
+        22 => (NamedKey::F22, Code::F22),
+        23 => (NamedKey::F23, Code::F23),
+        24 => (NamedKey::F24, Code::F24),
+        _ => (NamedKey::Unidentified, Code::Unidentified),
     }
 }

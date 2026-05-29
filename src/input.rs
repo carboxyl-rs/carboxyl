@@ -59,10 +59,7 @@ impl Event {
                     return vec![Event::Exit];
                 }
 
-                map_keyboard_event(key_event)
-                    .map(Event::Keyboard)
-                    .into_iter()
-                    .collect()
+                vec![Event::Keyboard(map_keyboard_event(key_event))]
             }
 
             CrosstermEvent::Mouse(MouseEvent {
