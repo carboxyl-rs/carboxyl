@@ -1,3 +1,4 @@
+pub(crate) mod color;
 mod browser_widget;
 mod nav_widget;
 mod text_overlay;

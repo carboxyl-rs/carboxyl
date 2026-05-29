@@ -62,11 +62,7 @@ impl WebViewDelegate for TerminalWebViewDelegate {
     }
 
     fn request_authentication(&self, _: WebView, request: AuthenticationRequest) {
-        let scope = if request.for_proxy() {
-            "proxy"
-        } else {
-            "origin"
-        };
+        let scope = if request.for_proxy() { "proxy" } else { "origin" };
         warn!(
             "authentication requested for {} ({scope}); no prompt implemented, denying",
             request.url()
@@ -74,12 +70,17 @@ impl WebViewDelegate for TerminalWebViewDelegate {
     }
 
     fn notify_load_status_changed(&self, _: WebView, status: LoadStatus) {
-        if self.native_text && matches!(status, LoadStatus::HeadParsed) {
-            let _ = self.servo_tx.try_send(ServoCommand::SuppressText);
+        if !self.native_text {
+            return;
         }
-
-        if self.native_text && matches!(status, LoadStatus::Complete) {
-            let _ = self.event_tx.try_send(RuntimeEvent::TextExtractRequested);
+        match status {
+            LoadStatus::HeadParsed => {
+                let _ = self.servo_tx.try_send(ServoCommand::SuppressText);
+            }
+            LoadStatus::Complete => {
+                let _ = self.event_tx.try_send(RuntimeEvent::TextExtractRequested);
+            }
+            _ => {}
         }
     }
 }

@@ -18,6 +18,65 @@ use super::delegates::{TerminalServoDelegate, TerminalWebViewDelegate};
 use super::events::{RuntimeEvent, ServoCommand};
 use super::waker::ServoWaker;
 
+// ---------------------------------------------------------------------------
+// Timing constants
+// ---------------------------------------------------------------------------
+
+/// Brief sleep after each `spin_event_loop` call. Prevents the servo thread
+/// from monopolising a core between paint/extract cycles while still allowing
+/// Servo's own timers and animation frames to fire promptly.
+const SERVO_SPIN_SLEEP: Duration = Duration::from_millis(1);
+
+// ---------------------------------------------------------------------------
+// PendingOps — batch-accumulates commands drained from the servo channel
+// ---------------------------------------------------------------------------
+
+/// Flags and deferred data accumulated while draining the command queue in
+/// one pass before calling `spin_event_loop`.
+///
+/// Immediate actions (Load, Input, etc.) are dispatched directly in `apply`;
+/// deferred actions (paint, extract, suppress) are flagged and executed
+/// afterwards in a fixed, deterministic order.
+#[derive(Default)]
+struct PendingOps {
+    shutdown: bool,
+    paint: bool,
+    extract: bool,
+    suppress: bool,
+    resize: Option<PhysicalSize<u32>>,
+}
+
+impl PendingOps {
+    fn apply(&mut self, cmd: ServoCommand, webview: &WebView) {
+        match cmd {
+            ServoCommand::Shutdown => self.shutdown = true,
+            ServoCommand::Load(url) => webview.load(url),
+            ServoCommand::GoBack => {
+                if webview.can_go_back() {
+                    webview.go_back(1);
+                }
+            }
+            ServoCommand::GoForward => {
+                if webview.can_go_forward() {
+                    webview.go_forward(1);
+                }
+            }
+            ServoCommand::Reload => webview.reload(),
+            ServoCommand::Resize(size) => self.resize = Some(size),
+            ServoCommand::Input(ev) => {
+                webview.notify_input_event(ev);
+            }
+            ServoCommand::Paint => self.paint = true,
+            ServoCommand::ExtractText => self.extract = true,
+            ServoCommand::SuppressText => self.suppress = true,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Thread entry point
+// ---------------------------------------------------------------------------
+
 pub fn servo_thread(
     event_tx: mpsc::SyncSender<RuntimeEvent>,
     servo_tx: mpsc::SyncSender<ServoCommand>,
@@ -60,70 +119,47 @@ pub fn servo_thread(
     webview.focus();
 
     while let Ok(cmd) = servo_rx.recv() {
-        let mut should_paint = false;
-        let mut should_extract = false;
-        let mut should_suppress = false;
-        let mut new_size: Option<PhysicalSize<u32>> = None;
-        let mut shutdown = false;
-
-        let mut handle = |cmd: ServoCommand| match cmd {
-            ServoCommand::Shutdown => shutdown = true,
-            ServoCommand::Load(url) => webview.load(url),
-            ServoCommand::GoBack => {
-                if webview.can_go_back() {
-                    webview.go_back(1);
-                }
-            }
-            ServoCommand::GoForward => {
-                if webview.can_go_forward() {
-                    webview.go_forward(1);
-                }
-            }
-            ServoCommand::Reload => webview.reload(),
-            ServoCommand::Resize(size) => new_size = Some(size),
-            ServoCommand::Input(ev) => {
-                webview.notify_input_event(ev);
-            }
-            ServoCommand::Paint => should_paint = true,
-            ServoCommand::ExtractText => should_extract = true,
-            ServoCommand::SuppressText => should_suppress = true,
-        };
-
-        handle(cmd);
-
+        // Drain the full queue before spinning, so a burst of commands is
+        // processed in one Servo cycle rather than many round-trips.
+        let mut ops = PendingOps::default();
+        ops.apply(cmd, &webview);
         while let Ok(cmd) = servo_rx.try_recv() {
-            handle(cmd);
+            ops.apply(cmd, &webview);
         }
 
-        if shutdown {
+        if ops.shutdown {
             break;
         }
 
-        if let Some(size) = new_size {
+        if let Some(size) = ops.resize {
             rendering_context.resize(size);
             webview.resize(size);
-            should_paint = true;
+            ops.paint = true;
         }
 
         servo.spin_event_loop();
 
         // Suppress first so Servo repaints with transparent text before we
         // extract node positions — guarantees the two are always paired.
-        if should_suppress {
+        if ops.suppress {
             suppress_text(&webview);
         }
 
-        if should_extract {
+        if ops.extract {
             extract_text(&webview, event_tx.clone());
         }
 
-        if should_paint && let Some(frame) = paint(&webview, rendering_context.as_ref()) {
+        if ops.paint && let Some(frame) = paint(&webview, rendering_context.as_ref()) {
             let _ = event_tx.try_send(RuntimeEvent::Frame(frame));
         }
 
-        thread::sleep(Duration::from_millis(1));
+        thread::sleep(SERVO_SPIN_SLEEP);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
 
 fn suppress_text(webview: &WebView) {
     webview.evaluate_javascript(SUPPRESS_TEXT_SCRIPT, |result| {

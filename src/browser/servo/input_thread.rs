@@ -9,10 +9,15 @@ use crate::input::{self, Event};
 
 use super::events::RuntimeEvent;
 
+/// How long to block on crossterm's event poll before sending a Wake tick.
+/// Short enough to keep the main loop responsive; long enough to avoid
+/// busy-spinning when the terminal is idle.
+const INPUT_POLL_TIMEOUT: Duration = Duration::from_millis(100);
+
 pub fn spawn_input_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         loop {
-            match ct_poll(Duration::from_millis(100)) {
+            match ct_poll(INPUT_POLL_TIMEOUT) {
                 Err(e) => {
                     error!("crossterm poll: {e}");
                     break;

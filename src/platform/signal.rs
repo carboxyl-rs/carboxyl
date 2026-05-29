@@ -26,7 +26,7 @@
 //!     POSIX lists `write` as async-signal-safe (POSIX.1-2017 §2.4.3).
 //!   - [`signal_hook::low_level::emulate_default_handler`] resets the
 //!     signal disposition via `sigaction` and re-raises the signal atomically,
-//!     producing the correct exit status and core-dump behaviour.
+//!     producing the correct exit status and core-dump behavior.
 //! - The `RESTORE` constant is `&'static [u8]` — no heap allocation occurs.
 //! - No locks, no panicking, no formatting inside the handler.
 //! - The signal disposition is reset before re-delivery, preventing
@@ -46,7 +46,7 @@ const RESTORE: &[u8] = b"\x1b[?25h\x1b[?1003l\x1b[?1006l\x1b[?1049l";
 
 /// Register a terminal-restore handler for [`SIGABRT`].
 ///
-/// Call once at process startup, before ratatui initialises the terminal.
+/// Call once at process startup, before ratatui initializes the terminal.
 /// Safe to call multiple times — subsequent registrations stack; the most
 /// recently registered handler runs first.
 ///
@@ -59,7 +59,7 @@ pub fn register() -> io::Result<()> {
         signal_hook::low_level::register(signal_hook::consts::SIGABRT, || {
             // Step 1: restore terminal — direct write(2), async-signal-safe.
             let _ = rustix::io::write(rustix::stdio::stdout(), RESTORE);
-            // Step 2: reset disposition and re-deliver with default behaviour
+            // Step 2: reset disposition and re-deliver with default behavior
             // (core dump / exit status). emulate_default_handler is atomic:
             // it unregisters this handler before raising, preventing re-entry.
             let _ = signal_hook::low_level::emulate_default_handler(signal_hook::consts::SIGABRT);

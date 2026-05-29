@@ -32,6 +32,10 @@ impl RenderConfig {
 /// Tracks when the last draw, paint command, and text-extract occurred so
 /// debounce / frame-rate limiting is expressed in one place rather than
 /// scattered `Instant`s throughout the loop.
+/// Minimum time between two consecutive text extractions. Prevents spamming
+/// the Servo thread with ExtractText commands during continuous scroll.
+const EXTRACT_DEBOUNCE: Duration = Duration::from_millis(300);
+
 pub struct TimingState {
     last_draw: Instant,
     last_paint_cmd: Instant,
@@ -41,14 +45,14 @@ pub struct TimingState {
 
 impl TimingState {
     pub fn new(frame_budget: Duration) -> Self {
-        // Initialise all timestamps in the past so the first event fires
+        // Initialize all timestamps in the past so the first event fires
         // immediately rather than waiting a full budget cycle.
         let past = Instant::now() - frame_budget;
         Self {
             last_draw: past,
             last_paint_cmd: past,
             last_extract: past,
-            extract_debounce: Duration::from_millis(300),
+            extract_debounce: EXTRACT_DEBOUNCE,
         }
     }
 

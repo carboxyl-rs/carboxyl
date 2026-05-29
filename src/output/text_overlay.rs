@@ -20,40 +20,20 @@ use servo::JSValue;
 use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
 
+use super::color::{LUMA_B, LUMA_G, LUMA_R, MAX_LUMA, to_terminal_color};
+
 // ---------------------------------------------------------------------------
-// Luma / contrast constants
+// Contrast constants
 // ---------------------------------------------------------------------------
 
-// BT.601 integer luma coefficients scaled by 256.
-// Exact: 0.299*256=76.544, 0.587*256=150.272, 0.114*256=29.184 — rounded.
-// A white pixel yields MAX_LUMA; a black pixel yields 0.
-const LUMA_R: u32 = 77;
-const LUMA_G: u32 = 150;
-const LUMA_B: u32 = 29;
-
-/// Maximum luma value (white: 255 × (77 + 150 + 29) = 255 × 256 = 65_280).
-const MAX_LUMA: u32 = 255 * (LUMA_R + LUMA_G + LUMA_B);
-
-/// Minimum luma difference required to consider fg/bg contrast acceptable.
-/// Empirically chosen on the 0–MAX_LUMA scale.
+/// Minimum luma difference (on the 0..=MAX_LUMA pre-shift scale) required
+/// to consider foreground/background contrast acceptable.
+/// Empirically tuned: small enough not to reject valid dim colors, large
+/// enough to prevent near-invisible text.
 const MIN_CONTRAST: u32 = 6_000;
 
 /// Luma threshold for the black-vs-white fallback. Half of MAX_LUMA.
 const MID_LUMA: u32 = MAX_LUMA / 2;
-
-// ---------------------------------------------------------------------------
-// 6×6×6 colour cube constants (xterm 256-colour)
-// ---------------------------------------------------------------------------
-
-/// First index of the 6×6×6 colour cube in the xterm 256-colour palette.
-const CUBE_BASE: u8 = 16;
-
-/// Number of steps per channel in the cube (0–5).
-const CUBE_STEPS: u8 = 6;
-
-/// Divisor to map a u8 channel value into a 0–5 cube index.
-/// 256 / 6 ≈ 42.67, so 43 gives the right bucket boundaries.
-const CUBE_CHANNEL_DIVISOR: u8 = 43;
 
 // ---------------------------------------------------------------------------
 // Data model
@@ -63,12 +43,14 @@ const CUBE_CHANNEL_DIVISOR: u8 = 43;
 #[derive(Clone, Debug)]
 pub struct TextNode {
     pub text: String,
-    /// Position in CSS pixels, viewport-relative (from getBoundingClientRect).
+    /// Position in CSS pixels, viewport-relative (from getBoundingClientRect,
+    /// adjusted by element padding+border to the content box origin).
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
-    /// Foreground color from `getComputedStyle().color`.
+    /// Foreground color from `getComputedStyle().color` read while the
+    /// suppress stylesheet is temporarily disabled.
     pub color: Color,
 }
 
@@ -134,9 +116,10 @@ fn f32_field(map: &std::collections::HashMap<String, JSValue>, key: &str) -> Opt
 
 /// Parse CSS `rgb(r, g, b)` or `rgba(r, g, b, a)`.
 ///
-/// After text suppression, computed color will be `rgba(r, g, b, 0)` —
-/// the RGB channels still carry the original color, so we read them as-is
-/// and discard the alpha component entirely.
+/// The extraction script temporarily disables the suppress stylesheet before
+/// reading `getComputedStyle().color`, so the values here are the page's
+/// authored colors. Alpha is ignored — semi-transparent text is rendered
+/// opaque in the terminal.
 fn parse_css_color(s: &str) -> Option<Color> {
     let inner = s
         .trim()
@@ -234,6 +217,10 @@ impl Widget for TextOverlay<'_> {
 
 /// Like `truncate_to_width`, but also stops at the first cell already
 /// claimed by a previously rendered node.
+///
+/// Wide characters (e.g. CJK glyphs, width = 2) occupy two consecutive
+/// cells. We reject them if ANY of those cells is already occupied —
+/// checking only the first cell would silently overwrite the second.
 fn truncate_to_available(
     s: &str,
     x: u16,
@@ -249,7 +236,8 @@ fn truncate_to_available(
         if width + w > max_cols {
             break;
         }
-        if occupied.contains(&(cursor, y)) {
+        // Check every cell the character occupies, not just the first.
+        if (0..w as u16).any(|i| occupied.contains(&(cursor + i, y))) {
             break;
         }
         result.push(ch);
@@ -259,9 +247,7 @@ fn truncate_to_available(
     result
 }
 
-/// Sample the average color of a terminal cell from the pixel buffer.
-/// Each cell covers `cell_pixels.x` × `cell_pixels.y` pixels — we sample
-/// the center pixel for speed.
+/// Sample the center pixel of a terminal cell from the RGBA8888 pixel buffer.
 fn sample_cell_bg(
     pixels: &[u8],
     pw: u32,
@@ -270,12 +256,13 @@ fn sample_cell_bg(
     row: u16,
     cell_pixels: Vec2,
 ) -> Option<(u8, u8, u8)> {
+    // Center of the cell in pixel coordinates.
     let px = ((col as f32 + 0.5) * cell_pixels.x) as usize;
     let py = ((row as f32 + 0.5) * cell_pixels.y) as usize;
 
     let x = px.min(pw as usize - 1);
     let y = py.min(ph as usize - 1);
-    let idx = (y * pw as usize + x) * 4;
+    let idx = (y * pw as usize + x) * 4; // ×4 for RGBA bytes per pixel
 
     if idx + 2 >= pixels.len() {
         return None;
@@ -284,18 +271,9 @@ fn sample_cell_bg(
     Some((pixels[idx], pixels[idx + 1], pixels[idx + 2]))
 }
 
-/// Convert an RGB triple to a ratatui `Color` based on terminal capability.
-fn to_terminal_color((r, g, b): (u8, u8, u8), true_color: bool) -> Color {
-    if true_color {
-        Color::Rgb(r, g, b)
-    } else {
-        let q = |v: u8| (v / CUBE_CHANNEL_DIVISOR).min(CUBE_STEPS - 1);
-        Color::Indexed(CUBE_BASE + q(r) * CUBE_STEPS * CUBE_STEPS + q(g) * CUBE_STEPS + q(b))
-    }
-}
-
-/// Ensure adequate contrast between fg and bg.
-/// Falls back to black or white based on background luminance.
+/// Ensure adequate contrast between `fg` and `bg`.
+/// Falls back to pure black or white based on background luminance when the
+/// two colors are too close to be readable.
 fn ensure_contrast(fg: Color, bg: Color) -> Color {
     let (fr, fg_g, fb) = rgb_of(fg);
     let (br, bg_g, bb) = rgb_of(bg);
@@ -314,11 +292,11 @@ fn ensure_contrast(fg: Color, bg: Color) -> Color {
     }
 }
 
-/// Decompose any ratatui `Color` into its `(r, g, b)` triple.
+/// Decompose any ratatui [`Color`] into its `(r, g, b)` triple.
 ///
 /// Named terminal colors are mapped to their conventional ANSI RGB values.
 /// `Color::Reset` and indexed colors outside the 6×6×6 cube are treated as
-/// mid-grey, which keeps contrast logic conservative rather than silent.
+/// mid-gray, keeping contrast logic conservative rather than silent.
 fn rgb_of(color: Color) -> (u8, u8, u8) {
     match color {
         Color::Rgb(r, g, b) => (r, g, b),
@@ -341,7 +319,7 @@ fn rgb_of(color: Color) -> (u8, u8, u8) {
         Color::LightCyan => (85, 255, 255),
         Color::White => (255, 255, 255),
 
-        // Indexed and Reset: conservatively mid-grey so contrast check errs
+        // Indexed and Reset: conservatively mid-gray so contrast check errs
         // toward the black/white fallback rather than passing an unknown color.
         Color::Indexed(_) | Color::Reset => (128, 128, 128),
     }
@@ -361,12 +339,13 @@ fn rgb_of(color: Color) -> (u8, u8, u8) {
 pub const SUPPRESS_TEXT_SCRIPT: &str = include_str!("suppress.js");
 
 /// Evaluates on the page and returns an Array of Objects with fields:
-/// `t` (text), `x`, `y`, `w`, `h` (viewport-relative CSS px), `c` (CSS color).
+/// `t` (text), `x`, `y`, `w`, `h` (viewport-relative CSS px, content-box
+/// origin), `c` (CSS color read with suppression temporarily disabled).
 ///
 /// Covers:
 /// - Regular text nodes via TreeWalker
 /// - `<button>` and `<select>` elements
 /// - `<input>` and `<textarea>` values
 /// - `[contenteditable]` elements
-/// - Filters: off-screen, zero-size, hidden, whitespace-only
+/// - Filters: off-screen, zero-size, hidden, occluded, whitespace-only
 pub const EXTRACTION_SCRIPT: &str = include_str!("extract.js");
