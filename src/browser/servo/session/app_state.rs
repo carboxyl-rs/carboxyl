@@ -1,6 +1,6 @@
 use crate::output::{BrowserFrame, NavState, NavigationCapability, TextNode, Window};
 
-use super::super::{events::DelegateEvent, geometry::BrowserPoint};
+use super::{events::DelegateEvent, geometry::BrowserPoint};
 
 // ---------------------------------------------------------------------------
 // AppState
@@ -65,13 +65,10 @@ impl AppState {
     pub fn apply_delegate(&mut self, ev: DelegateEvent) -> Option<String> {
         match ev {
             DelegateEvent::UrlChanged(url) => {
-                self.nav.push(
-                    url,
-                    NavigationCapability {
-                        back: self.nav.nav.back,
-                        forward: self.nav.nav.forward,
-                    },
-                );
+                // Preserve the current capability flags unchanged; HistoryChanged
+                // fires immediately after with the authoritative back/forward state.
+                let nav = self.nav.nav;
+                self.nav.push(url, nav);
             }
 
             DelegateEvent::HistoryChanged {

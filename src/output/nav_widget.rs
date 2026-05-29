@@ -5,7 +5,7 @@ use ratatui::{
     text::Span,
     widgets::Widget,
 };
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use url::Url;
 
 use servo::{Key as ServoKey, Modifiers as ServoModifiers, NamedKey};
@@ -77,7 +77,8 @@ pub struct NavState {
     /// address bar is not focused.
     pub staged: Option<String>,
     pub nav: NavigationCapability,
-    /// Cursor position within the URL field (char index).
+    /// Byte offset into the staged (or committed URL) string.
+    /// `None` when the address bar is not focused.
     pub cursor: Option<usize>,
 }
 
@@ -128,15 +129,28 @@ impl NavState {
                     }
 
                     ServoKey::Named(NamedKey::ArrowDown) => {
-                        self.cursor = Some(self.displayed_url().width());
+                        self.cursor = Some(self.displayed_url().len());
                     }
 
                     ServoKey::Named(NamedKey::ArrowRight) => {
-                        self.cursor = Some((cursor + 1).min(self.displayed_url().width()));
+                        let s = self.displayed_url();
+                        // Advance by exactly one Unicode scalar, not one byte.
+                        let new = s[cursor..]
+                            .chars()
+                            .next()
+                            .map(|ch| cursor + ch.len_utf8())
+                            .unwrap_or(s.len());
+                        self.cursor = Some(new);
                     }
 
                     ServoKey::Named(NamedKey::ArrowLeft) => {
-                        self.cursor = Some(cursor.saturating_sub(1));
+                        // Retreat to the start of the preceding Unicode scalar.
+                        let new = self.displayed_url()[..cursor]
+                            .char_indices()
+                            .next_back()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        self.cursor = Some(new);
                     }
 
                     ServoKey::Named(NamedKey::Backspace) if cursor > 0 => {
@@ -144,9 +158,11 @@ impl NavState {
                             .staged
                             .get_or_insert_with(|| self.url.as_str().to_owned());
 
-                        if cursor <= buf.len() {
-                            buf.remove(cursor - 1);
-                            self.cursor = Some(cursor - 1);
+                        // Find and remove the whole char ending at `cursor`.
+                        let clamped = cursor.min(buf.len());
+                        if let Some((prev, _)) = buf[..clamped].char_indices().next_back() {
+                            buf.drain(prev..clamped);
+                            self.cursor = Some(prev);
                         }
                     }
 
@@ -155,8 +171,14 @@ impl NavState {
                             .staged
                             .get_or_insert_with(|| self.url.as_str().to_owned());
 
+                        // Remove the whole char starting at `cursor`.
                         if cursor < buf.len() {
-                            buf.remove(cursor);
+                            let ch_len = buf[cursor..]
+                                .chars()
+                                .next()
+                                .map(|c| c.len_utf8())
+                                .unwrap_or(1);
+                            buf.drain(cursor..cursor + ch_len);
                         }
                     }
 
@@ -168,8 +190,10 @@ impl NavState {
                                 .staged
                                 .get_or_insert_with(|| self.url.as_str().to_owned());
 
-                            buf.insert(cursor, ch);
-                            self.cursor = Some((cursor + 1).min(buf.width()));
+                            // Insert at the nearest valid char boundary.
+                            let pos = cursor.min(buf.len());
+                            buf.insert(pos, ch);
+                            self.cursor = Some(pos + ch.len_utf8());
                         }
                     }
 
@@ -201,10 +225,11 @@ impl NavState {
             return NavAction::Refresh;
         }
         if col >= URL_FIELD_START {
-            let offset = (col as usize).saturating_sub(URL_FIELD_START as usize);
-            self.cursor = Some(offset.min(self.url.as_str().width()));
-            // Populate the staging buffer so edits don't start from blank.
-            self.staged = Some(self.url.as_str().to_owned());
+            let col_offset = (col as usize).saturating_sub(URL_FIELD_START as usize);
+            let url_str = self.url.as_str();
+            // Convert visual column offset to the byte position within the string.
+            self.cursor = Some(col_to_byte_offset(url_str, col_offset));
+            self.staged = Some(url_str.to_owned());
             return NavAction::Ignore;
         }
 
@@ -253,6 +278,7 @@ pub enum NavAction {
 // NavWidget
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy)]
 pub struct NavWidget<'a> {
     state: &'a NavState,
 }
@@ -263,7 +289,11 @@ impl<'a> NavWidget<'a> {
     }
 
     pub fn cursor_position(&self, area: Rect) -> Option<(u16, u16)> {
-        let col = URL_FIELD_START + self.state.cursor? as u16;
+        let byte_pos = self.state.cursor?;
+        let s = self.state.staged.as_deref().unwrap_or(self.state.url.as_str());
+        // Convert byte offset back to display columns for terminal cursor placement.
+        let display_col = s[..byte_pos.min(s.len())].width() as u16;
+        let col = URL_FIELD_START + display_col;
         Some((area.x + col.min(area.width.saturating_sub(1)), area.y))
     }
 }
@@ -307,4 +337,21 @@ impl Widget for NavWidget<'_> {
             buf[(x, y)].set_char(' ').set_style(active);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Convert a visual-column offset within `s` to the corresponding byte index.
+/// If `col` exceeds the string's display width, returns `s.len()`.
+fn col_to_byte_offset(s: &str, col: usize) -> usize {
+    let mut width = 0;
+    for (byte_pos, ch) in s.char_indices() {
+        if width >= col {
+            return byte_pos;
+        }
+        width += ch.width().unwrap_or(0);
+    }
+    s.len()
 }

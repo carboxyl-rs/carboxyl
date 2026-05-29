@@ -40,7 +40,6 @@ pub struct TimingState {
     last_draw: Instant,
     last_paint_cmd: Instant,
     last_extract: Instant,
-    extract_debounce: Duration,
 }
 
 impl TimingState {
@@ -52,7 +51,6 @@ impl TimingState {
             last_draw: past,
             last_paint_cmd: past,
             last_extract: past,
-            extract_debounce: EXTRACT_DEBOUNCE,
         }
     }
 
@@ -69,7 +67,7 @@ impl TimingState {
     }
 
     pub fn extract_due(&self) -> bool {
-        self.last_extract.elapsed() >= self.extract_debounce
+        self.last_extract.elapsed() >= EXTRACT_DEBOUNCE
     }
 
     // ------------------------------------------------------------------
@@ -91,6 +89,6 @@ impl TimingState {
     /// Force the next `extract_due` check to return `true`. Called after a
     /// navigation or resize that invalidates the previously extracted text.
     pub fn invalidate_extract(&mut self) {
-        self.last_extract = Instant::now() - self.extract_debounce;
+        self.last_extract = Instant::now() - EXTRACT_DEBOUNCE;
     }
 }

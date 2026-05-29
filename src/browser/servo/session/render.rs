@@ -21,7 +21,10 @@ pub fn draw_frame(
         let [nav_area, browser_area] =
             Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(f.area());
 
-        f.render_widget(NavWidget::new(&app.nav), nav_area);
+        // NavWidget is Copy (holds only &NavState), so we create it once and
+        // reuse the same value for both rendering and cursor placement.
+        let nav = NavWidget::new(&app.nav);
+        f.render_widget(nav, nav_area);
 
         if let Some(frame) = app.frame.as_ref() {
             f.render_widget(BrowserWidget::new(frame, cfg.true_color), browser_area);
@@ -40,7 +43,7 @@ pub fn draw_frame(
             }
         }
 
-        if let Some(pos) = NavWidget::new(&app.nav).cursor_position(nav_area) {
+        if let Some(pos) = nav.cursor_position(nav_area) {
             f.set_cursor_position(pos);
         }
     })?;

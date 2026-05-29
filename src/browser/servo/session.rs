@@ -16,6 +16,10 @@ use super::BrowserConfig;
 use super::events::{RuntimeEvent, ServoCommand};
 use super::geometry::physical_size;
 
+// Re-exported so sub-modules (dispatch, app_state) can import via `super::`
+// instead of climbing two levels with `super::super::`.
+pub(super) use super::{events, geometry, url};
+
 pub use app_state::AppState;
 pub use timing::{RenderConfig, TimingState};
 
@@ -109,9 +113,7 @@ impl Session {
                     }
                     self.timing.mark_paint_cmd();
                 }
-                if self.cfg.native_text && self.timing.extract_due() {
-                    self.schedule_extract();
-                }
+                self.maybe_schedule_extract();
             }
 
             RuntimeEvent::Resize(cols, rows) => {
@@ -123,9 +125,7 @@ impl Session {
                 {
                     log::trace!("resize command dropped — servo channel at capacity");
                 }
-                if self.cfg.native_text && self.timing.extract_due() {
-                    self.schedule_extract();
-                }
+                self.maybe_schedule_extract();
             }
 
             RuntimeEvent::Frame(f) => {
@@ -168,5 +168,11 @@ impl Session {
             log::trace!("extract command dropped — servo channel at capacity");
         }
         self.timing.mark_extracted();
+    }
+
+    fn maybe_schedule_extract(&mut self) {
+        if self.cfg.native_text && self.timing.extract_due() {
+            self.schedule_extract();
+        }
     }
 }

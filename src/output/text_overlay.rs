@@ -77,7 +77,7 @@ pub fn parse_js_nodes(value: &JSValue) -> Vec<TextNode> {
             let w = f32_field(map, "w")?;
             let h = f32_field(map, "h")?;
 
-            if w <= 0.0 || h <= 0.0 || y < 0.0 {
+            if w <= 0.0 || h <= 0.0 || x < 0.0 || y < 0.0 {
                 return None;
             }
 

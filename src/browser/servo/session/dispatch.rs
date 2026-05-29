@@ -9,9 +9,9 @@ use servo::{
 use crate::input;
 use crate::output::NavAction;
 
-use super::super::events::{RuntimeEvent, ServoCommand};
-use super::super::geometry::BrowserPoint;
-use super::super::url::normalize_url;
+use super::events::{RuntimeEvent, ServoCommand};
+use super::geometry::BrowserPoint;
+use super::url::normalize_url;
 use super::app_state::AppState;
 
 // ---------------------------------------------------------------------------
