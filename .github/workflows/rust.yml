@@ -10,7 +10,7 @@ env:
 
 jobs:
   test:
-    name: Build, Test, Clippy
+    name: Test, Clippy
     runs-on: self-hosted # giant-rat (runs arch linux), provided by lysator :)
 
     steps:
