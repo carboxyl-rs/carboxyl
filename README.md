@@ -19,6 +19,12 @@ Carboxyl is a community fork of [Carbonyl](https://github.com/fathyb/carbonyl), 
 It's snappy, starts almost instantly, runs at 60 FPS by default (can be toggled), and idles at 1% CPU usage.
 It does not require a window server (i.e. works in a safe-mode console), and even runs through SSH.
 
+> Join the Carboxyl community on [Discord](https://discord.gg/jzun3aN2ak).
+>
+> <a href="https://discord.gg/jzun3aN2ak">
+>  <img alt="Join the Discord server" src="https://img.shields.io/badge/Discord-Join%20server-5865F2?logo=discord&logoColor=white">
+> </a>
+
 ## Status
 
 > Carboxyl now has a dedicated Chromium build server provided by [Lysator](https://www.lysator.liu.se/)!
