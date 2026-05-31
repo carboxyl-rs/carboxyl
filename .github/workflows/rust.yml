@@ -11,7 +11,7 @@ env:
 jobs:
   test:
     name: Build, Test, Clippy
-    runs-on: self-hosted
+    runs-on: self-hosted # giant-rat, provided by lysator
 
     steps:
       - uses: actions/checkout@v6
