@@ -21,6 +21,9 @@ It does not require a window server (i.e. works in a safe-mode console), and eve
 
 ## Status
 
+> Carboxyl now has a dedicated Chromium build server provided by [Lysator](https://www.lysator.liu.se/)!
+> See [this issue](https://github.com/carboxyl-rs/carboxyl/issues/9) for details.
+
 - The active runtime path is Servo-based.
 - Chromium-specific build glue and launch scripts are removed from the supported workflow.
 - Rendering currently goes through Servo's software rendering context so it can stay terminal-first and window-server-free.
@@ -56,7 +59,7 @@ The build is now a normal Cargo build for the `carboxyl` binary. The first build
 
 * Text rendering using terminal native text (IN PROGRESS)
 
-  * Texts often colide and overwrite each other
+  * Text rendering isn't quite clean for chunks of text
   * Test for unrendered text
   * Performance optimization (on native text)
 
