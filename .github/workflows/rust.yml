@@ -11,7 +11,7 @@ env:
 jobs:
   test:
     name: Build, Test, Clippy
-    runs-on: self-hosted # giant-rat, provided by lysator
+    runs-on: self-hosted # giant-rat (runs arch linux), provided by lysator :)
 
     steps:
       - uses: actions/checkout@v6
@@ -23,13 +23,13 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            pkg-config \
-            libssl-dev \
-            libgl1-mesa-dev \
-            libfontconfig1-dev
+          sudo pacman -Syu --noconfirm
+          sudo pacman -S --noconfirm --needed \
+            base-devel \
+            pkgconf \
+            openssl \
+            mesa \
+            fontconfig
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
