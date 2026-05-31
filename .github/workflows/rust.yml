@@ -21,22 +21,6 @@ jobs:
         with:
           components: clippy
 
-      - name: Install system dependencies
-        run: |
-          sudo pacman -Syu --noconfirm
-          sudo pacman -S --noconfirm --needed \
-            base-devel \
-            pkgconf \
-            openssl \
-            mesa \
-            fontconfig
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Build
-        run: cargo build --verbose
-
       - name: Run Tests
         run: cargo test --verbose
 
