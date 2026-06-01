@@ -17,8 +17,7 @@ use ratatui::{
     widgets::Widget,
 };
 use servo::JSValue;
-use std::collections::HashSet;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::UnicodeWidthChar;
 
 use super::color::{LUMA_B, LUMA_G, LUMA_R, MAX_LUMA, to_terminal_color};
 
@@ -169,10 +168,17 @@ impl<'a> TextOverlay<'a> {
 
 impl Widget for TextOverlay<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        // Terminal cells written this frame — (absolute_x, absolute_y).
-        // Earlier nodes in DOM order take priority; later nodes truncate
-        // at the first occupied cell so they never overwrite.
-        let mut occupied: HashSet<(u16, u16)> = HashSet::new();
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+
+        let grid_w = area.width as usize;
+        let grid_h = area.height as usize;
+
+        // Flat occupied bitmap indexed by (relative_row * grid_w + relative_col).
+        // Avoids per-character hashing; terminal dimensions keep this under ~30 KB.
+        // Earlier nodes in DOM order take priority.
+        let mut occupied = vec![false; grid_w * grid_h];
 
         for node in self.nodes {
             let col = (node.x / self.cell_pixels.x).floor() as u16;
@@ -194,20 +200,29 @@ impl Widget for TextOverlay<'_> {
 
             let fg = ensure_contrast(node.color, bg);
 
-            // Truncate to area edge AND to first occupied cell.
-            let text = truncate_to_available(&node.text, x, y, max_cols, &occupied);
+            let text = truncate_to_available(
+                &node.text,
+                col as usize,
+                row as usize,
+                max_cols,
+                &occupied,
+                grid_w,
+            );
             if text.is_empty() {
                 continue;
             }
 
-            // Mark cells occupied before the next node runs.
-            let mut cursor = x;
+            // Mark cells occupied (relative coordinates) before the next node runs.
+            let mut cur = col as usize;
             for ch in text.chars() {
-                let w = ch.to_string().width() as u16;
+                let w = ch.width().unwrap_or(0);
                 for i in 0..w {
-                    occupied.insert((cursor + i, y));
+                    let idx = row as usize * grid_w + cur + i;
+                    if idx < occupied.len() {
+                        occupied[idx] = true;
+                    }
                 }
-                cursor += w;
+                cur += w;
             }
 
             buf.set_string(x, y, &text, Style::new().fg(fg).bg(bg));
@@ -215,34 +230,37 @@ impl Widget for TextOverlay<'_> {
     }
 }
 
-/// Like `truncate_to_width`, but also stops at the first cell already
-/// claimed by a previously rendered node.
+/// Truncate `s` to fit within `max_cols` display columns, stopping early at
+/// the first cell already claimed by a previously rendered node.
 ///
-/// Wide characters (e.g. CJK glyphs, width = 2) occupy two consecutive
-/// cells. We reject them if ANY of those cells is already occupied —
-/// checking only the first cell would silently overwrite the second.
+/// Uses relative `(col, row)` coordinates and a flat occupied bitmap so
+/// lookups are simple array reads with no hashing. Wide characters (e.g. CJK,
+/// width = 2) are rejected if ANY of their cells is occupied.
 fn truncate_to_available(
     s: &str,
-    x: u16,
-    y: u16,
+    col: usize,
+    row: usize,
     max_cols: usize,
-    occupied: &HashSet<(u16, u16)>,
+    occupied: &[bool],
+    grid_w: usize,
 ) -> String {
-    let mut width = 0;
+    let mut width = 0usize;
     let mut result = String::new();
-    let mut cursor = x;
+    let mut cursor = col;
     for ch in s.chars() {
-        let w = ch.to_string().width();
+        let w = ch.width().unwrap_or(0);
         if width + w > max_cols {
             break;
         }
-        // Check every cell the character occupies, not just the first.
-        if (0..w as u16).any(|i| occupied.contains(&(cursor + i, y))) {
+        if (0..w).any(|i| {
+            let idx = row * grid_w + cursor + i;
+            idx < occupied.len() && occupied[idx]
+        }) {
             break;
         }
         result.push(ch);
         width += w;
-        cursor += w as u16;
+        cursor += w;
     }
     result
 }

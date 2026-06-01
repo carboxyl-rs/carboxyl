@@ -1,6 +1,6 @@
 use crossterm::event::{
-    Event as CrosstermEvent, KeyCode, KeyModifiers, MouseButton as CrosstermMouseButton,
-    MouseEvent, MouseEventKind,
+    Event as CrosstermEvent, KeyCode, KeyEventKind, KeyModifiers,
+    MouseButton as CrosstermMouseButton, MouseEvent, MouseEventKind,
 };
 
 use servo::{KeyboardEvent as ServoKeyboardEvent, Modifiers as ServoModifiers};
@@ -53,6 +53,12 @@ impl Event {
     pub fn from_crossterm(event: CrosstermEvent) -> Vec<Self> {
         match event {
             CrosstermEvent::Key(key_event) => {
+                // Ratatui enables the Kitty keyboard protocol which sends both
+                // press and release events. Ignore releases so each key fires once.
+                if key_event.kind == KeyEventKind::Release {
+                    return vec![];
+                }
+
                 if key_event.code == KeyCode::Char('c')
                     && key_event.modifiers.contains(KeyModifiers::CONTROL)
                 {
