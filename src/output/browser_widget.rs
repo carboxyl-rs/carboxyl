@@ -1,10 +1,5 @@
 use glam::UVec2;
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::Style,
-    widgets::Widget,
-};
+use ratatui::{buffer::Buffer, layout::Rect, style::Style, widgets::Widget};
 
 use super::color::{LUMA_B, LUMA_G, LUMA_R, LUMA_SHIFT, to_terminal_color};
 
@@ -81,10 +76,42 @@ impl Widget for BrowserWidget<'_> {
         for cy in 0..area.height as usize {
             for cx in 0..area.width as usize {
                 // Sample the four corners of this cell's sub-pixel quad.
-                let tl = sample(&self.frame.pixels, fw, fh, tw, th, cx * SUBCELL_COLS, cy * SUBCELL_ROWS);
-                let tr = sample(&self.frame.pixels, fw, fh, tw, th, cx * SUBCELL_COLS + 1, cy * SUBCELL_ROWS);
-                let bl = sample(&self.frame.pixels, fw, fh, tw, th, cx * SUBCELL_COLS, cy * SUBCELL_ROWS + SUBCELL_BOT_ROW);
-                let br = sample(&self.frame.pixels, fw, fh, tw, th, cx * SUBCELL_COLS + 1, cy * SUBCELL_ROWS + SUBCELL_BOT_ROW);
+                let tl = sample(
+                    &self.frame.pixels,
+                    fw,
+                    fh,
+                    tw,
+                    th,
+                    cx * SUBCELL_COLS,
+                    cy * SUBCELL_ROWS,
+                );
+                let tr = sample(
+                    &self.frame.pixels,
+                    fw,
+                    fh,
+                    tw,
+                    th,
+                    cx * SUBCELL_COLS + 1,
+                    cy * SUBCELL_ROWS,
+                );
+                let bl = sample(
+                    &self.frame.pixels,
+                    fw,
+                    fh,
+                    tw,
+                    th,
+                    cx * SUBCELL_COLS,
+                    cy * SUBCELL_ROWS + SUBCELL_BOT_ROW,
+                );
+                let br = sample(
+                    &self.frame.pixels,
+                    fw,
+                    fh,
+                    tw,
+                    th,
+                    cx * SUBCELL_COLS + 1,
+                    cy * SUBCELL_ROWS + SUBCELL_BOT_ROW,
+                );
 
                 let (fg_rgb, bg_rgb) = fg_bg(tl, tr, bl, br);
                 let ch = quadrant_char(tl, tr, bl, br);

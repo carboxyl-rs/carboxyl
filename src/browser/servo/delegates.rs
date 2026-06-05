@@ -62,7 +62,11 @@ impl WebViewDelegate for TerminalWebViewDelegate {
     }
 
     fn request_authentication(&self, _: WebView, request: AuthenticationRequest) {
-        let scope = if request.for_proxy() { "proxy" } else { "origin" };
+        let scope = if request.for_proxy() {
+            "proxy"
+        } else {
+            "origin"
+        };
         warn!(
             "authentication requested for {} ({scope}); no prompt implemented, denying",
             request.url()

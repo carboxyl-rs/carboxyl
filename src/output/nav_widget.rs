@@ -290,7 +290,11 @@ impl<'a> NavWidget<'a> {
 
     pub fn cursor_position(&self, area: Rect) -> Option<(u16, u16)> {
         let byte_pos = self.state.cursor?;
-        let s = self.state.staged.as_deref().unwrap_or(self.state.url.as_str());
+        let s = self
+            .state
+            .staged
+            .as_deref()
+            .unwrap_or(self.state.url.as_str());
         // Convert byte offset back to display columns for terminal cursor placement.
         let display_col = s[..byte_pos.min(s.len())].width() as u16;
         let col = URL_FIELD_START + display_col;

@@ -1,5 +1,5 @@
-pub(crate) mod color;
 mod browser_widget;
+pub(crate) mod color;
 mod nav_widget;
 mod text_overlay;
 mod window;

@@ -147,7 +147,9 @@ pub fn servo_thread(
             extract_text(&webview, event_tx.clone());
         }
 
-        if ops.paint && let Some(frame) = paint(&webview, rendering_context.as_ref()) {
+        if ops.paint
+            && let Some(frame) = paint(&webview, rendering_context.as_ref())
+        {
             let _ = event_tx.try_send(RuntimeEvent::Frame(frame));
         }
 

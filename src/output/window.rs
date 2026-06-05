@@ -105,10 +105,7 @@ impl Window {
     /// Produce an updated `Window` for a terminal resize event.
     /// Reuses `cell_pixels` from the current window — only cell count changes.
     pub fn resize(&self, cols: u16, rows: u16) -> Self {
-        let cells = UVec2::new(
-            cols as u32,
-            rows.saturating_sub(NAV_BAR_ROWS) as u32,
-        );
+        let cells = UVec2::new(cols as u32, rows.saturating_sub(NAV_BAR_ROWS) as u32);
         let browser = UVec2::new(
             (cells.x as f32 * self.cell_pixels.x).ceil() as u32,
             (cells.y as f32 * self.cell_pixels.y).ceil() as u32,

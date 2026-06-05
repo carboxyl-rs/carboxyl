@@ -9,10 +9,10 @@ use servo::{
 use crate::input;
 use crate::output::NavAction;
 
+use super::app_state::AppState;
 use super::events::{RuntimeEvent, ServoCommand};
 use super::geometry::BrowserPoint;
 use super::url::normalize_url;
-use super::app_state::AppState;
 
 // ---------------------------------------------------------------------------
 // Public entry points
