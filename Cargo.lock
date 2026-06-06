@@ -2251,9 +2251,9 @@ dependencies = [
 
 [[package]]
 name = "glam"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fb167719045debebe9f532320accc7b5c993c5a3b813f5696a11d5ca7bdc57b"
+checksum = "898f5a568a84989b6c0f8caa50a93074b97dbdc58fc6d9543157bb4562758933"
 
 [[package]]
 name = "gleam"
@@ -3245,9 +3245,9 @@ checksum = "edcd27d72f2f071c64249075f42e205ff93c9a4c5f6c6da53e79ed9f9832c285"
 
 [[package]]
 name = "imgref"
-version = "1.12.1"
+version = "1.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40fac9d56ed6437b198fddba683305e8e2d651aa42647f00f5ae542e7f5c94a2"
+checksum = "89194689a993ab15268672e99e7b0e19da2da3268ac682e8f02d29d4d1434cd7"
 
 [[package]]
 name = "imsz"
