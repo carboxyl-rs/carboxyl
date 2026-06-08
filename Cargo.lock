@@ -2319,7 +2319,7 @@ dependencies = [
  "fnv",
  "futures-core",
  "futures-sink",
- "http 1.4.1",
+ "http 1.4.2",
  "indexmap",
  "slab",
  "tokio",
@@ -2404,7 +2404,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "headers-core",
- "http 1.4.1",
+ "http 1.4.2",
  "httpdate",
  "mime",
  "sha1",
@@ -2416,7 +2416,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54b4a22553d4242c49fddb9ba998a99962b5cc6f22cb5a3482bec22522403ce4"
 dependencies = [
- "http 1.4.1",
+ "http 1.4.2",
 ]
 
 [[package]]
@@ -2484,9 +2484,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.4.1"
+version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8be7462df143984c4598a256ef469b251d7d7f9e271135073e78fc535414f3d0"
+checksum = "6970f50e31d6fc17d3fa27329444bfa74e196cf62e95052a3f6fee181dba6425"
 dependencies = [
  "bytes",
  "itoa",
@@ -2499,7 +2499,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1efedce1fb8e6913f23e0c92de8e62cd5b772a67e7b3946df930a62566c93184"
 dependencies = [
  "bytes",
- "http 1.4.1",
+ "http 1.4.2",
 ]
 
 [[package]]
@@ -2510,7 +2510,7 @@ checksum = "b021d93e26becf5dc7e1b75b1bed1fd93124b374ceb73f43d4d4eafec896a64a"
 dependencies = [
  "bytes",
  "futures-core",
- "http 1.4.1",
+ "http 1.4.2",
  "http-body",
  "pin-project-lite",
 ]
@@ -2556,7 +2556,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "h2",
- "http 1.4.1",
+ "http 1.4.2",
  "http-body",
  "httparse",
  "itoa",
@@ -2572,7 +2572,7 @@ version = "0.27.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ca68d021ef39cf6463ab54c1d0f5daf03377b70561305bb89a8f83aab66e0f"
 dependencies = [
- "http 1.4.1",
+ "http 1.4.2",
  "hyper",
  "hyper-util",
  "log",
@@ -2593,7 +2593,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-util",
- "http 1.4.1",
+ "http 1.4.2",
  "http-body",
  "hyper",
  "ipnet",
@@ -3820,7 +3820,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc819448803ee517eb413276ca59613c2850a95c4fdcd87ec82c5a6ce6cdab1a"
 dependencies = [
  "buf-read-ext",
- "http 1.4.1",
+ "http 1.4.2",
  "httparse",
  "log",
  "mime",
@@ -5719,7 +5719,7 @@ dependencies = [
  "env_logger",
  "euclid",
  "gaol",
- "http 1.4.1",
+ "http 1.4.2",
  "image",
  "ipc-channel",
  "keyboard-types",
@@ -5962,7 +5962,7 @@ dependencies = [
  "content-security-policy",
  "encoding_rs",
  "euclid",
- "http 1.4.1",
+ "http 1.4.2",
  "ipc-channel",
  "log",
  "malloc_size_of_derive",
@@ -6018,7 +6018,7 @@ dependencies = [
  "chrono",
  "crossbeam-channel",
  "headers",
- "http 1.4.1",
+ "http 1.4.2",
  "log",
  "malloc_size_of_derive",
  "rand 0.9.4",
@@ -6043,7 +6043,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71b6639e519409abedad4bc8cdebf88f9cbda058bf48982142677b180f43769f"
 dependencies = [
- "http 1.4.1",
+ "http 1.4.2",
  "malloc_size_of_derive",
  "serde",
  "servo-base",
@@ -6078,7 +6078,7 @@ dependencies = [
  "cookie 0.18.1",
  "crossbeam-channel",
  "euclid",
- "http 1.4.1",
+ "http 1.4.2",
  "image",
  "inventory",
  "keyboard-types",
@@ -6204,7 +6204,7 @@ checksum = "2d0021ccbb80489d50c284e321c2b18ddf2d9f8c8a0c08bd8e24404bc30dc752"
 dependencies = [
  "cookie 0.18.1",
  "headers",
- "http 1.4.1",
+ "http 1.4.2",
  "hyper",
  "mime",
  "serde_bytes",
@@ -6325,7 +6325,7 @@ dependencies = [
  "data-url",
  "encoding_rs",
  "euclid",
- "http 1.4.1",
+ "http 1.4.2",
  "icu_locid",
  "indexmap",
  "ipc-channel",
@@ -6546,7 +6546,7 @@ dependencies = [
  "futures-util",
  "generic-array",
  "headers",
- "http 1.4.1",
+ "http 1.4.2",
  "http-body-util",
  "hyper",
  "hyper-rustls",
@@ -6606,7 +6606,7 @@ dependencies = [
  "crossbeam-channel",
  "data-url",
  "headers",
- "http 1.4.1",
+ "http 1.4.2",
  "hyper-util",
  "ipc-channel",
  "log",
@@ -6804,7 +6804,7 @@ dependencies = [
  "headers",
  "hkdf",
  "html5ever",
- "http 1.4.1",
+ "http 1.4.2",
  "icu_locid",
  "indexmap",
  "ipc-channel",
@@ -7618,9 +7618,9 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surfman"
-version = "0.12.2"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2f5e8af3ca54762c5f3854f9fddc88134bc3e996c2938624a71e28ede83f218"
+checksum = "15317532328e0f6e5da2abad68391297621ddf66810e5819e92271318cc08feb"
 dependencies = [
  "bitflags 2.13.0",
  "cfg_aliases",
@@ -8218,7 +8218,7 @@ checksum = "6c01152af293afb9c7c2a57e4b559c5620b421f6d133261c60dd2d0cdb38e6b8"
 dependencies = [
  "bytes",
  "data-encoding",
- "http 1.4.1",
+ "http 1.4.2",
  "httparse",
  "log",
  "rand 0.9.4",
