@@ -4,13 +4,15 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '0 0 1 * *'
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   test:
-    name: Test, Clippy
+    name: Test, Fmt, Clippy
     runs-on: self-hosted # giant-rat (runs arch linux), provided by lysator :)
 
     steps:
@@ -19,10 +21,13 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - name: Run Tests
         run: cargo test --verbose
 
+      - name: Format Check
+        run: cargo fmt --all -- --check
+
       - name: Clippy
-        run: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
