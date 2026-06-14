@@ -1,6 +1,6 @@
 [package]
-name = "carbonyl"
-version = "0.0.3"
+name = "carboxyl"
+version = "0.0.4-rc.0"
 edition = "2021"
 
 [dependencies]
@@ -10,6 +10,6 @@ unicode-segmentation = "1.10.0"
 chrono = "0.4.23"
 
 [lib]
-name = "carbonyl"
+name = "carboxyl"
 path = "src/lib.rs"
 crate-type = ["cdylib"]
