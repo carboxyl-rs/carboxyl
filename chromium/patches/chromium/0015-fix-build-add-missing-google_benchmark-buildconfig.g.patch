@@ -1,0 +1,28 @@
+From 5b39449a9ef0b260a2d9459e2023902606e53eee Mon Sep 17 00:00:00 2001
+From: Joseph Magly <1159087+jmagly@users.noreply.github.com>
+Date: Fri, 3 Apr 2026 19:29:44 -0400
+Subject: [PATCH 15/25] fix(build): add missing google_benchmark
+ buildconfig.gni
+
+This file is imported by WebRTC rtc_base BUILD.gn but was not present
+in the M120 gclient sync output. Declares enable_google_benchmarks=false
+to satisfy the import without building benchmarks.
+---
+ third_party/google_benchmark/buildconfig.gni | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+ create mode 100644 third_party/google_benchmark/buildconfig.gni
+
+diff --git a/third_party/google_benchmark/buildconfig.gni b/third_party/google_benchmark/buildconfig.gni
+new file mode 100644
+index 0000000000000..8bc8df93d0e67
+--- /dev/null
++++ b/third_party/google_benchmark/buildconfig.gni
+@@ -0,0 +1,8 @@
++# Copyright 2019 The Chromium Authors
++# Use of this source code is governed by a BSD-style license that can be
++# found in the LICENSE file.
++
++declare_args() {
++  # Enable compilation of google_benchmark-based benchmarks.
++  enable_google_benchmarks = false
++}

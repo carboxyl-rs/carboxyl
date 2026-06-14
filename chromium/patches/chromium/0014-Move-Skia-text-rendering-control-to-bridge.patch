@@ -1,7 +1,7 @@
-From 2275364ee7e16ba6b46f0f339e34326d4a8c7584 Mon Sep 17 00:00:00 2001
+From a7a1381b0de8a2a8646c790fb4ed4befa0e91a34 Mon Sep 17 00:00:00 2001
 From: Fathy Boundjadj <hey@fathy.fr>
 Date: Mon, 13 Feb 2023 17:13:38 +0100
-Subject: [PATCH 14/14] Move Skia text rendering control to bridge
+Subject: [PATCH 14/25] Move Skia text rendering control to bridge
 
 ---
  content/renderer/render_frame_impl.cc | 5 -----
@@ -9,10 +9,10 @@ Subject: [PATCH 14/14] Move Skia text rendering control to bridge
  2 files changed, 1 insertion(+), 6 deletions(-)
 
 diff --git a/content/renderer/render_frame_impl.cc b/content/renderer/render_frame_impl.cc
-index 379cf6c58b2b0..891efd6a9d796 100644
+index 2765f88606abd..4efd81b5b90d5 100644
 --- a/content/renderer/render_frame_impl.cc
 +++ b/content/renderer/render_frame_impl.cc
-@@ -285,7 +285,6 @@
+@@ -290,7 +290,6 @@
  #include "third_party/skia/include/svg/SkSVGCanvas.h"
  #include "third_party/skia/include/utils/SkBase64.h"
  #include "third_party/skia/src/text/GlyphRun.h"
@@ -20,7 +20,7 @@ index 379cf6c58b2b0..891efd6a9d796 100644
  #include "third_party/skia/src/core/SkClipStackDevice.h"
  #include "third_party/skia/src/core/SkDevice.h"
  #include "third_party/skia/src/core/SkFontPriv.h"
-@@ -2244,10 +2243,6 @@ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
+@@ -2324,10 +2323,6 @@ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
    );
  
    host->ObserveTerminalRender(render_callback_);
@@ -32,15 +32,15 @@ index 379cf6c58b2b0..891efd6a9d796 100644
  
  void RenderFrameImpl::GetInterface(
 diff --git a/skia/BUILD.gn b/skia/BUILD.gn
-index b330273c16db3..297ffacf073fa 100644
+index 31fad5923ad2d..04399742f79d7 100644
 --- a/skia/BUILD.gn
 +++ b/skia/BUILD.gn
-@@ -203,7 +203,7 @@ source_set("skcms") {
+@@ -227,7 +227,7 @@ source_set("skia_core_public_headers") {
  }
  
  component("skia") {
 -  deps = []
 +  deps = [ "//carbonyl/src/browser:bridge" ]
-   sources = [
-     # Chrome sources.
-     "config/SkUserConfig.h",
+   public = [
+     "ext/benchmarking_canvas.h",
+     "ext/cicp.h",

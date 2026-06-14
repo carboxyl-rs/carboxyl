@@ -1,0 +1,59 @@
+From af4dc707d712c49fed970f55c33985ce2d6b8094 Mon Sep 17 00:00:00 2001
+From: Joseph Magly <1159087+jmagly@users.noreply.github.com>
+Date: Sun, 5 Apr 2026 02:18:10 -0400
+Subject: [PATCH 21/25] fix(m120): fix base64 and CreateSkFont API changes in
+ font.cc
+
+- Add missing base/base64.h include
+- Simplify Base64Encode call (base::make_span/as_bytes no longer needed)
+- CreateSkFont dropped first bool param in M120; remove it
+---
+ third_party/blink/renderer/platform/fonts/font.cc | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/third_party/blink/renderer/platform/fonts/font.cc b/third_party/blink/renderer/platform/fonts/font.cc
+index bf10907b23071..ec516dbac1140 100644
+--- a/third_party/blink/renderer/platform/fonts/font.cc
++++ b/third_party/blink/renderer/platform/fonts/font.cc
+@@ -43,6 +43,7 @@
+ #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
+ #include "ui/gfx/geometry/rect_f.h"
+ 
++#include "base/base64.h"
+ #include "carbonyl/src/browser/bridge.h"
+ 
+ namespace blink {
+@@ -180,14 +181,14 @@ void Font::DrawText(cc::PaintCanvas* canvas,
+       run_info.from,
+       run_info.to - run_info.from
+     ).ToString().Utf8();
+-    auto base64 = base::Base64Encode(base::as_bytes(base::make_span(string)));
++    auto base64 = base::Base64Encode(string);
+ 
+     // Bypass HarfBuzz text shaping for the Carbonyl Skia back-end
+     auto blob = SkTextBlob::MakeFromString(
+       base64.c_str(),
+       PrimaryFont()->
+         PlatformData().
+-        CreateSkFont(false, &font_description_)
++        CreateSkFont(&font_description_)
+     );
+ 
+     if (node_id != cc::kInvalidNodeId) {
+@@ -228,14 +229,14 @@ void Font::DrawText(cc::PaintCanvas* canvas,
+       text_info.from,
+       text_info.Length()
+     ).ToString().Utf8();
+-    auto base64 = base::Base64Encode(base::as_bytes(base::make_span(string)));
++    auto base64 = base::Base64Encode(string);
+ 
+     // Bypass HarfBuzz text shaping for the Carbonyl Skia back-end
+     auto blob = SkTextBlob::MakeFromString(
+       base64.c_str(),
+       PrimaryFont()->
+         PlatformData().
+-        CreateSkFont(false, &font_description_)
++        CreateSkFont(&font_description_)
+     );
+ 
+     if (node_id != cc::kInvalidNodeId) {

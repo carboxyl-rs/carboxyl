@@ -6,39 +6,42 @@ source "$CARBONYL_ROOT/scripts/env.sh"
 
 cd "$CHROMIUM_SRC"
 
-chromium_upstream="92da8189788b1b373cbd3348f73d695dfdc521b6"
-skia_upstream="486deb23bc2a4d3d09c66fef52c2ad64d8b4f761"
-webrtc_upstream="727080cbacd58a2f303ed8a03f0264fe1493e47a"
+# M147 (147.0.7727.94) baseline commits.
+chromium_upstream="be35d570111fa75402da99a722251d8af5ee5990"
+skia_upstream="d203629ce869dbb142ca186c7da60a97cfb1550d"
+webrtc_upstream="9179833d210d105aede5d4ec516734a6bd1ef2e8"
 
 if [[ "$1" == "apply" ]]; then
-    echo "Stashing Chromium changes.."
-    git add -A .
-    git stash
+    reset_and_apply() {
+        local repo_path="$1"
+        local upstream_sha="$2"
+        local patches_dir="$3"
 
-    echo "Applying Chromium patches.."
-    git checkout "$chromium_upstream"
-    git am --committer-date-is-author-date "$CARBONYL_ROOT/chromium/patches/chromium"/*
-    "$CARBONYL_ROOT/scripts/restore-mtime.sh" "$chromium_upstream"
+        echo "Resetting $repo_path to $upstream_sha.."
+        cd "$repo_path"
+        git am --abort >/dev/null 2>&1 || true
+        git rebase --abort >/dev/null 2>&1 || true
 
-    echo "Stashing Skia changes.."
-    cd "$CHROMIUM_SRC/third_party/skia"
-    git add -A .
-    git stash
+        if ! git cat-file -e "$upstream_sha^{commit}" >/dev/null 2>&1; then
+            echo "Fetching missing upstream commit $upstream_sha in $repo_path.."
+            git fetch origin "$upstream_sha"
+        fi
 
-    echo "Applying Skia patches.."
-    git checkout "$skia_upstream"
-    git am --committer-date-is-author-date "$CARBONYL_ROOT/chromium/patches/skia"/*
-    "$CARBONYL_ROOT/scripts/restore-mtime.sh" "$skia_upstream"
+        git reset --hard "$upstream_sha"
 
-    echo "Stashing WebRTC changes.."
-    cd "$CHROMIUM_SRC/third_party/webrtc"
-    git add -A .
-    git stash
+        if ! compgen -G "$patches_dir/*.patch" > /dev/null; then
+            echo "No patches in $patches_dir - skipping git am"
+        else
+            echo "Applying patches from $patches_dir.."
+            git am --committer-date-is-author-date "$patches_dir"/*.patch
+        fi
 
-    echo "Applying WebRTC patches.."
-    git checkout "$webrtc_upstream"
-    git am --committer-date-is-author-date "$CARBONYL_ROOT/chromium/patches/webrtc"/*
-    "$CARBONYL_ROOT/scripts/restore-mtime.sh" "$webrtc_upstream"
+        "$CARBONYL_ROOT/scripts/restore-mtime.sh" "$upstream_sha"
+    }
+
+    reset_and_apply "$CHROMIUM_SRC" "$chromium_upstream" "$CARBONYL_ROOT/chromium/patches/chromium"
+    reset_and_apply "$CHROMIUM_SRC/third_party/skia" "$skia_upstream" "$CARBONYL_ROOT/chromium/patches/skia"
+    reset_and_apply "$CHROMIUM_SRC/third_party/webrtc" "$webrtc_upstream" "$CARBONYL_ROOT/chromium/patches/webrtc"
 
     echo "Patches successfully applied"
 elif [[ "$1" == "save" ]]; then

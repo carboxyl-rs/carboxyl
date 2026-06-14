@@ -1,0 +1,52 @@
+From 6da5c717a6aa3d13c52276540d96d9d24c75b661 Mon Sep 17 00:00:00 2001
+From: Joseph Magly <1159087+jmagly@users.noreply.github.com>
+Date: Sun, 5 Apr 2026 01:10:56 -0400
+Subject: [PATCH 19/25] fix(m120): fix Skia API changes in render_frame_impl.cc
+
+- Remove unused SkUTF.h include (moved to internal src/base/)
+- SkBaseDevice renamed to SkDevice in M120
+- onCreateDevice() renamed to createDevice(), returns sk_sp<SkDevice> not raw ptr
+- SkAutoSTArray removed; replace with std::vector<SkUnichar>
+---
+ content/renderer/render_frame_impl.cc | 11 +++++------
+ 1 file changed, 5 insertions(+), 6 deletions(-)
+
+diff --git a/content/renderer/render_frame_impl.cc b/content/renderer/render_frame_impl.cc
+index b4cd56c28e5e5..76dd51d000b88 100644
+--- a/content/renderer/render_frame_impl.cc
++++ b/content/renderer/render_frame_impl.cc
+@@ -293,7 +293,6 @@
+ #include "third_party/skia/src/core/SkClipStackDevice.h"
+ #include "third_party/skia/src/core/SkDevice.h"
+ #include "third_party/skia/src/core/SkFontPriv.h"
+-#include "third_party/skia/src/utils/SkUTF.h"
+ 
+ using base::Time;
+ using blink::ContextMenuData;
+@@ -2072,11 +2071,11 @@ public:
+   }
+ 
+ protected:
+-  SkBaseDevice* onCreateDevice(const CreateInfo& info, const SkPaint*) override {
+-    return new TextCaptureDevice(info.fInfo, SkSurfaceProps(0, info.fPixelGeometry));
++  sk_sp<SkDevice> createDevice(const CreateInfo& info, const SkPaint*) override {
++    return sk_make_sp<TextCaptureDevice>(info.fInfo, SkSurfaceProps(0, info.fPixelGeometry));
+   }
+ 
+-  void drawDevice(SkBaseDevice* baseDevice, const SkSamplingOptions&, const SkPaint& paint) override {
++  void drawDevice(SkDevice* baseDevice, const SkSamplingOptions&, const SkPaint& paint) override {
+     if(isUnsupportedPaint(paint)) {
+       return;
+     }
+@@ -2168,9 +2167,9 @@ protected:
+ 
+     for (auto& glyphRun : glyphRunList) {
+       auto runSize = glyphRun.runSize();
+-      SkAutoSTArray<64, SkUnichar> unichars(runSize);
++      std::vector<SkUnichar> unichars(runSize);
+       SkFontPriv::GlyphsToUnichars(glyphRun.font(), glyphRun.glyphsIDs().data(),
+-                                    runSize, unichars.get());
++                                    runSize, unichars.data());
+ 
+       auto base64_ptr = std::make_unique<char[]>(runSize + 1);
+       char* base64 = base64_ptr.get();

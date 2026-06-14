@@ -1,0 +1,340 @@
+From c9ba517062eff722daca626634a0760e6f56cc49 Mon Sep 17 00:00:00 2001
+From: Joseph Magly <1159087+jmagly@users.noreply.github.com>
+Date: Thu, 9 Apr 2026 11:50:01 -0400
+Subject: [PATCH 23/25] =?UTF-8?q?fix(m135):=20Path=20B=20build=20fixes=20?=
+ =?UTF-8?q?=E2=80=94=20disable=20b64=20text=20capture?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Surgical fixes to make headless_shell link under M135. Path B per
+roctinam/carbonyl#27 — disables the b64 text-capture path which
+reaches into blink/renderer/core internals from a non-blink TU and
+triggers an Oilpan/cppgc cascade. Path A (#28) extracts text capture
+into a real blink TU and is the structural fix.
+
+Fixes by file:
+
+- content/renderer/render_frame_impl.cc:
+  - Drop blink/renderer/core includes (cppgc cascade trigger)
+  - Wrap TextCaptureDevice class in #if 0
+  - Wrap render_callback_ lambda + ObserveTerminalRender in #if 0
+  - Guard render_callback_.get() deref against null
+  - Fix onDrawGlyphRunList override (3 args, not 4)
+  - browser_interface_broker_proxy_ -> GetBrowserInterfaceBroker()
+  - [=] -> [=, this] (deprecated capture)
+
+- headless/lib/browser/headless_screen.{cc,h}:
+  - Bridge::GetSize() doesn't exist; use Renderer::GetCurrent()->GetSize()
+  - IsNaturalPortrait moved from protected to public
+
+- headless/lib/browser/headless_browser_impl.cc:
+  - content::NativeWebKeyboardEvent -> input::NativeWebKeyboardEvent
+  - [=] -> [=, this] (deprecated capture)
+  - [[maybe_unused]] on kDefaultWindowSize / kDefaultFontRenderHinting
+
+- components/viz/service/display_embedder/software_output_device_proxy.cc:
+  - Drop output_device_backing.h include (Windows-only in M135)
+  - CreatePlatformCanvasWithPixels: pass new bytes_per_row=0 arg
+
+- third_party/blink/renderer/core/css/resolver/style_resolver.cc:
+  - FontFamily::SetFamily removed; use constructor
+
+- third_party/blink/renderer/platform/fonts/font.cc:
+  - Construct TextRunPaintInfo locally (no longer a function param)
+
+- third_party/blink/renderer/platform/graphics/graphics_context.h:
+  - [[maybe_unused]] on disable_destruction_checks_
+
+- third_party/blink/renderer/bindings/core/v8/script_promise_resolver.cc:
+  - Restore empty Dispose() body (header still declares it under
+    DCHECK_IS_ON; carbonyl patch had removed the definition entirely)
+
+See: roctinam/carbonyl#27
+---
+ .../software_output_device_proxy.cc           |  4 +-
+ content/renderer/render_frame_impl.cc         | 40 +++++++++++++------
+ headless/lib/browser/headless_browser_impl.cc | 12 ++++--
+ headless/lib/browser/headless_screen.cc       |  6 ++-
+ headless/lib/browser/headless_screen.h        |  1 +
+ .../core/v8/script_promise_resolver.cc        | 17 +++-----
+ .../core/css/resolver/style_resolver.cc       |  6 +--
+ .../blink/renderer/platform/fonts/font.cc     |  3 ++
+ .../platform/graphics/graphics_context.h      |  2 +-
+ 9 files changed, 56 insertions(+), 35 deletions(-)
+
+diff --git a/components/viz/service/display_embedder/software_output_device_proxy.cc b/components/viz/service/display_embedder/software_output_device_proxy.cc
+index c76e94705b67a..427d9bb4e4d05 100644
+--- a/components/viz/service/display_embedder/software_output_device_proxy.cc
++++ b/components/viz/service/display_embedder/software_output_device_proxy.cc
+@@ -6,7 +6,6 @@
+ #include "build/build_config.h"
+ #include "components/viz/common/resources/resource_sizes.h"
+ #include "components/viz/common/resources/shared_image_format.h"
+-#include "components/viz/service/display_embedder/output_device_backing.h"
+ #include "mojo/public/cpp/system/platform_handle.h"
+ #include "services/viz/privileged/mojom/compositing/layered_window_updater.mojom.h"
+ #include "skia/ext/platform_canvas.h"
+@@ -117,7 +116,8 @@ void SoftwareOutputDeviceProxy::ResizeDelegated() {
+ 
+   canvas_ = skia::CreatePlatformCanvasWithPixels(
+       viewport_pixel_size_.width(), viewport_pixel_size_.height(), false,
+-      static_cast<uint8_t*>(shm_mapping_.memory()), skia::CRASH_ON_FAILURE);
++      static_cast<uint8_t*>(shm_mapping_.memory()), 0u,
++      skia::CRASH_ON_FAILURE);
+   #endif
+ 
+   // Transfer region ownership to the browser process.
+diff --git a/content/renderer/render_frame_impl.cc b/content/renderer/render_frame_impl.cc
+index 76dd51d000b88..82101bd3c69aa 100644
+--- a/content/renderer/render_frame_impl.cc
++++ b/content/renderer/render_frame_impl.cc
+@@ -273,14 +273,14 @@
+ #include "cc/trees/layer_tree_host.h"
+ #include "cc/trees/render_frame_metadata_observer.h"
+ #include "components/paint_preview/common/paint_preview_tracker.h"
+-#include "third_party/blink/renderer/core/exported/web_view_impl.h"
+-#include "third_party/blink/renderer/core/dom/frame_request_callback_collection.h"
+-#include "third_party/blink/renderer/core/frame/local_frame_view.h"
+-#include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+-#include "third_party/blink/renderer/core/paint/paint_flags.h"
+-#include "third_party/blink/renderer/core/layout/layout_view.h"
+-#include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
+-#include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
++// M135 Path B (#27): the b64 text-capture path reaches into blink/renderer/core
++// internals from this non-blink TU, which triggers an Oilpan/cppgc cascade via
++// the kCustomizeSupportsUnretained constraint hook in garbage_collected.h once
++// any base::SequenceBound<T>::Storage::Destruct flows void* through Unretained.
++// The blink/renderer/core includes, the TextCaptureDevice class, and the
++// render_callback_ lambda are all temporarily disabled until #28 (Path A)
++// extracts text capture into a real blink TU. Bitmap rendering is unaffected.
++// See #27 for the full diagnosis.
+ #include "third_party/skia/include/codec/SkEncodedImageFormat.h"
+ #include "third_party/skia/include/core/SkMesh.h"
+ #include "third_party/skia/include/core/SkStream.h"
+@@ -2033,13 +2033,21 @@ RenderFrameImpl::~RenderFrameImpl() {
+       process_label_id_);
+   agent_scheduling_group_->RemoveFrameRoute(frame_token_);
+ 
+-  if (auto& callback = *render_callback_.get()) {
+-    callback = nullptr;
++  // M135 Path B (#27): render_callback_ is never assigned now (text capture
++  // disabled), so guard the dereference. Restored by #28.
++  if (render_callback_) {
++    if (auto& callback = *render_callback_.get()) {
++      callback = nullptr;
++    }
+   }
+ }
+ 
+ } // namespace content
+ 
++// M135 Path B (#27): TextCaptureDevice disabled — depends on blink/renderer
++// internals that trigger the cppgc cascade in this non-blink TU. Restored by
++// #28 (extracting text capture into a real blink TU).
++#if 0
+ namespace carbonyl {
+ class TextCaptureDevice: public SkClipStackDevice {
+ public:
+@@ -2161,7 +2169,6 @@ protected:
+ 
+   void onDrawGlyphRunList(SkCanvas*,
+                           const sktext::GlyphRunList& glyphRunList,
+-                          const SkPaint&,
+                           const SkPaint& paint) override {
+     auto position = scale(glyphRunList.origin());
+ 
+@@ -2242,6 +2249,7 @@ class RendererService {
+ };
+ 
+ } // namespace carbonyl
++#endif  // M135 Path B (#27)
+ 
+ namespace content {
+ 
+@@ -2270,7 +2278,7 @@ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
+                                   GetBrowserInterfaceBroker());
+   }
+ 
+-  browser_interface_broker_proxy_.GetInterface(std::move(carbonyl_render_service_receiver_));
++  GetBrowserInterfaceBroker().GetInterface(std::move(carbonyl_render_service_receiver_));
+ 
+   // Bind this class to mojom::Frame and to the message router for legacy IPC.
+   // These must be called after |frame_| is set since binding requires a
+@@ -2282,6 +2290,11 @@ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
+       frame_token_,
+       this, GetTaskRunner(blink::TaskType::kInternalNavigationAssociated));
+ 
++  // M135 Path B (#27): the b64 text-capture render callback is disabled.
++  // It depended on blink/renderer/core internals that trigger the cppgc
++  // cascade in this non-blink TU. Bitmap rendering (the default) is unaffected.
++  // Restored by #28.
++#if 0
+   if (base::CommandLine::ForCurrentProcess()->HasSwitch("carbonyl-b64-text")) {
+     setenv("carbonyl_b64_text", "true", 1);
+   }
+@@ -2290,7 +2303,7 @@ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
+   auto renderer = std::make_shared<carbonyl::RendererService>();
+ 
+   render_callback_ = std::make_shared<std::function<bool()>>(
+-    [=]() -> bool {
++    [=, this]() -> bool {
+       if (!IsMainFrame() || IsHidden() || carbonyl::Bridge::BitmapMode()) {
+         return false;
+       }
+@@ -2312,6 +2325,7 @@ void RenderFrameImpl::Initialize(blink::WebFrame* parent) {
+   );
+ 
+   host->ObserveTerminalRender(render_callback_);
++#endif  // M135 Path B (#27)
+ }
+ 
+ void RenderFrameImpl::GetInterface(
+diff --git a/headless/lib/browser/headless_browser_impl.cc b/headless/lib/browser/headless_browser_impl.cc
+index 43d8c71167a7b..f1ba2b6b74d24 100644
+--- a/headless/lib/browser/headless_browser_impl.cc
++++ b/headless/lib/browser/headless_browser_impl.cc
+@@ -18,8 +18,12 @@
+ #include "base/task/single_thread_task_runner.h"
+ #include "build/config/linux/dbus/buildflags.h"
+ #include "components/embedder_support/user_agent_utils.h"
++<<<<<<< HEAD
+ #include "components/os_crypt/async/browser/os_crypt_async.h"
+ #include "components/os_crypt/async/common/encryptor.h"
++=======
++#include "components/input/native_web_keyboard_event.h"
++>>>>>>> fix(m135): Path B build fixes — disable b64 text capture
+ #include "components/version_info/version_info.h"
+ #include "components/zoom/zoom_controller.h"
+ #include "content/public/browser/browser_task_traits.h"
+@@ -93,9 +97,9 @@ namespace {
+ 
+ // Product name for building the default user agent string.
+ const char kHeadlessProductName[] = "Google Chrome";
+-constexpr gfx::Size kDefaultWindowSize(800, 600);
++[[maybe_unused]] constexpr gfx::Size kDefaultWindowSize(800, 600);
+ 
+-constexpr gfx::FontRenderParams::Hinting kDefaultFontRenderHinting =
++[[maybe_unused]] constexpr gfx::FontRenderParams::Hinting kDefaultFontRenderHinting =
+     gfx::FontRenderParams::Hinting::HINTING_FULL;
+ 
+ #if defined(HEADLESS_USE_PREFS)
+@@ -462,7 +466,7 @@ void HeadlessBrowserImpl::OnScrollInput(int delta) {
+ 
+ void HeadlessBrowserImpl::OnKeyPressInput(char key) {
+   bool raw = true;
+-  content::NativeWebKeyboardEvent event(
++  input::NativeWebKeyboardEvent event(
+       blink::WebKeyboardEvent::Type::kRawKeyDown,
+       blink::WebInputEvent::kNoModifiers,
+       base::TimeTicks::Now());
+@@ -625,7 +629,7 @@ void HeadlessBrowserImpl::PreMainMessageLoopRun() {
+     }
+   });
+ 
+-  input_thread_ = std::thread([=]() {
++  input_thread_ = std::thread([=, this]() {
+     carbonyl::browser = this;
+ 
+     carbonyl_renderer_browser_delegate delegate = {
+diff --git a/headless/lib/browser/headless_screen.cc b/headless/lib/browser/headless_screen.cc
+index 69630b5e71d20..6d548b1ef87f0 100644
+--- a/headless/lib/browser/headless_screen.cc
++++ b/headless/lib/browser/headless_screen.cc
+@@ -78,7 +78,11 @@ Display HeadlessScreen::GetDisplayNearestWindow(
+ 
+ void HeadlessScreen::Resize() {
+   float dpi = carbonyl::Bridge::GetDPI();
+-  auto size = carbonyl::Bridge::GetSize();
++  auto* renderer = carbonyl::Renderer::GetCurrent();
++  if (!renderer) {
++    return;
++  }
++  auto size = renderer->GetSize();
+   auto bounds = gfx::Rect(0, 0, size.width(), size.height());
+ 
+   auto displays = GetAllDisplays();
+diff --git a/headless/lib/browser/headless_screen.h b/headless/lib/browser/headless_screen.h
+index dcd01a91c3a05..b71b44acc1cbc 100644
+--- a/headless/lib/browser/headless_screen.h
++++ b/headless/lib/browser/headless_screen.h
+@@ -56,6 +56,7 @@ class HeadlessScreen : public display::ScreenBase,
+       gfx::NativeWindow window) const override;
+   bool IsHeadless() const override;
+ 
++ public:
+   bool IsNaturalPortrait(int64_t display_id) const;
+   bool IsNaturalLandscape(int64_t display_id) const;
+ 
+diff --git a/third_party/blink/renderer/bindings/core/v8/script_promise_resolver.cc b/third_party/blink/renderer/bindings/core/v8/script_promise_resolver.cc
+index 1ebc545b24517..4863b0e5188ec 100644
+--- a/third_party/blink/renderer/bindings/core/v8/script_promise_resolver.cc
++++ b/third_party/blink/renderer/bindings/core/v8/script_promise_resolver.cc
+@@ -47,17 +47,12 @@ ScriptPromiseResolverBase::ScriptPromiseResolverBase(
+ 
+ ScriptPromiseResolverBase::~ScriptPromiseResolverBase() = default;
+ 
+-// carbonyl: disabled spurious detach check (fires in headless mode)
+-#if 0 // DCHECK_IS_ON()
+-void ScriptPromiseResolverBase::Dispose() {
+-  const bool is_properly_detached = state_ == kDone || !is_promise_called_ ||
+-                                    !GetScriptState()->ContextIsValid() ||
+-                                    !GetExecutionContext() ||
+-                                    GetExecutionContext()->IsContextDestroyed();
+-  if (!is_properly_detached && !suppress_detach_check_) {
+-    DCHECK(false);
+-  }
+-}
++#if DCHECK_IS_ON()
++// carbonyl: detach check body removed (fires spuriously in headless mode),
++// but the empty definition is still required because the header declares
++// Dispose() unconditionally under DCHECK_IS_ON(), and ScriptPromiseResolverBase
++// references it from InvokePreFinalizer.
++void ScriptPromiseResolverBase::Dispose() {}
+ #endif
+ 
+ void ScriptPromiseResolverBase::Reject(DOMException* value) {
+diff --git a/third_party/blink/renderer/core/css/resolver/style_resolver.cc b/third_party/blink/renderer/core/css/resolver/style_resolver.cc
+index 778e6468e1c85..d2d9f8f093849 100644
+--- a/third_party/blink/renderer/core/css/resolver/style_resolver.cc
++++ b/third_party/blink/renderer/core/css/resolver/style_resolver.cc
+@@ -1486,9 +1486,9 @@ const ComputedStyle* StyleResolver::ResolveStyle(
+ 
+   if (!carbonyl::Bridge::BitmapMode()) {
+     auto font = state.StyleBuilder().GetFontDescription();
+-    FontFamily family;
+-
+-    family.SetFamily(AtomicString("monospace"), FontFamily::Type::kGenericFamily);
++    // M135: FontFamily no longer has SetFamily(); use constructor instead.
++    FontFamily family(AtomicString("monospace"),
++                      FontFamily::Type::kGenericFamily);
+     font.SetFamily(family);
+     font.SetStretch(kExtraExpandedWidthValue);
+     font.SetKerning(FontDescription::kNoneKerning);
+diff --git a/third_party/blink/renderer/platform/fonts/font.cc b/third_party/blink/renderer/platform/fonts/font.cc
+index ec516dbac1140..d2e45b29e133e 100644
+--- a/third_party/blink/renderer/platform/fonts/font.cc
++++ b/third_party/blink/renderer/platform/fonts/font.cc
+@@ -176,6 +176,9 @@ void Font::DrawText(cc::PaintCanvas* canvas,
+     return;
+ 
+   if (!carbonyl::Bridge::BitmapMode()) {
++    // M135: TextRunPaintInfo is now constructed locally; original M111 patch
++    // assumed it was a function parameter.
++    TextRunPaintInfo run_info(run);
+     auto string = StringView(
+       run_info.run.ToStringView(),
+       run_info.from,
+diff --git a/third_party/blink/renderer/platform/graphics/graphics_context.h b/third_party/blink/renderer/platform/graphics/graphics_context.h
+index 8267faf51b7ef..991736fefe61a 100644
+--- a/third_party/blink/renderer/platform/graphics/graphics_context.h
++++ b/third_party/blink/renderer/platform/graphics/graphics_context.h
+@@ -565,7 +565,7 @@ class PLATFORM_EXPORT GraphicsContext {
+ 
+ #if DCHECK_IS_ON()
+   int layer_count_ = 0;
+-  bool disable_destruction_checks_ = false;
++  [[maybe_unused]] bool disable_destruction_checks_ = false;
+ #endif
+ 
+   std::unique_ptr<DarkModeFilter> dark_mode_filter_;

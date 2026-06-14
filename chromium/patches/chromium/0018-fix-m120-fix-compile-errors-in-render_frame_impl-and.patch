@@ -1,0 +1,106 @@
+From 8831ec54bbb2c848857706ca169e4621566ce737 Mon Sep 17 00:00:00 2001
+From: Joseph Magly <1159087+jmagly@users.noreply.github.com>
+Date: Sat, 4 Apr 2026 21:51:24 -0400
+Subject: [PATCH 18/25] fix(m120): fix compile errors in render_frame_impl and
+ headless_browser_impl
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- render_frame_impl.h: include carbonyl.mojom.h (full type needed for mojo::Remote<>)
+- render_frame_impl.cc: fix SkEncodedImageFormat path (core→codec), replace SkBase64 with base::Base64Decode (src/base not public in M120)
+- headless_browser_impl.h: add missing did_shutdown_ member variable
+- headless_browser_impl.cc: set did_shutdown_ = true in Shutdown()
+---
+ content/renderer/render_frame_impl.cc         | 20 +++++--------------
+ content/renderer/render_frame_impl.h          |  1 +
+ headless/lib/browser/headless_browser_impl.cc |  1 +
+ headless/lib/browser/headless_browser_impl.h  |  1 +
+ 4 files changed, 8 insertions(+), 15 deletions(-)
+
+diff --git a/content/renderer/render_frame_impl.cc b/content/renderer/render_frame_impl.cc
+index 4efd81b5b90d5..b4cd56c28e5e5 100644
+--- a/content/renderer/render_frame_impl.cc
++++ b/content/renderer/render_frame_impl.cc
+@@ -281,14 +281,14 @@
+ #include "third_party/blink/renderer/core/layout/layout_view.h"
+ #include "third_party/blink/renderer/platform/graphics/paint/cull_rect.h"
+ #include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
+-#include "third_party/skia/include/core/SkEncodedImageFormat.h"
++#include "third_party/skia/include/codec/SkEncodedImageFormat.h"
+ #include "third_party/skia/include/core/SkMesh.h"
+ #include "third_party/skia/include/core/SkStream.h"
+ #include "third_party/skia/include/core/SkSurface.h"
+ #include "third_party/skia/include/core/SkVertices.h"
+ #include "third_party/skia/include/docs/SkPDFDocument.h"
+ #include "third_party/skia/include/svg/SkSVGCanvas.h"
+-#include "third_party/skia/include/utils/SkBase64.h"
++#include "base/base64.h"
+ #include "third_party/skia/src/text/GlyphRun.h"
+ #include "third_party/skia/src/core/SkClipStackDevice.h"
+ #include "third_party/skia/src/core/SkDevice.h"
+@@ -2181,25 +2181,15 @@ protected:
+ 
+       base64[runSize] = '\0';
+ 
+-      size_t size = 0;
+-      auto error = SkBase64::Decode(base64, runSize, nullptr, &size);
++      auto decoded = base::Base64Decode(std::string_view(base64, runSize));
+ 
+-      if (error != SkBase64::kNoError) {
+-          return;
+-      }
+-
+-      auto utf8_ptr = std::make_unique<char[]>(size);
+-      char* utf8 = utf8_ptr.get();
+-
+-      error = SkBase64::Decode(base64, runSize, utf8, &size);
+-
+-      if (error != SkBase64::kNoError) {
++      if (!decoded) {
+           return;
+       }
+ 
+       data_.push_back(
+         carbonyl::mojom::TextData::New(
+-          std::string(utf8, size),
++          std::string(decoded->begin(), decoded->end()),
+           gfx::RectF(position.x(), position.y(), 0, 0),
+           paint.getColor()
+         )
+diff --git a/content/renderer/render_frame_impl.h b/content/renderer/render_frame_impl.h
+index f24837c78b32e..20b4fdfbab065 100644
+--- a/content/renderer/render_frame_impl.h
++++ b/content/renderer/render_frame_impl.h
+@@ -127,6 +127,7 @@
+ #include "url/gurl.h"
+ #include "url/origin.h"
+ #include "v8/include/v8-forward.h"
++#include "carbonyl/src/browser/carbonyl.mojom.h"
+ 
+ #if BUILDFLAG(IS_ANDROID)
+ #include "content/common/gin_java_bridge.mojom.h"
+diff --git a/headless/lib/browser/headless_browser_impl.cc b/headless/lib/browser/headless_browser_impl.cc
+index a7c66b2fe7016..43d8c71167a7b 100644
+--- a/headless/lib/browser/headless_browser_impl.cc
++++ b/headless/lib/browser/headless_browser_impl.cc
+@@ -183,6 +183,7 @@ HeadlessBrowserImpl::BrowserMainThread() const {
+ void HeadlessBrowserImpl::Shutdown() {
+   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+ 
++  did_shutdown_ = true;
+   weak_ptr_factory_.InvalidateWeakPtrs();
+   // Make sure GetAllBrowserContexts is sane if called after this point.
+   auto tmp = std::move(browser_contexts_);
+diff --git a/headless/lib/browser/headless_browser_impl.h b/headless/lib/browser/headless_browser_impl.h
+index eed25b81f39c6..840cf9c5d4fa4 100644
+--- a/headless/lib/browser/headless_browser_impl.h
++++ b/headless/lib/browser/headless_browser_impl.h
+@@ -147,6 +147,7 @@ class HEADLESS_EXPORT HeadlessBrowserImpl : public HeadlessBrowser {
+   std::unique_ptr<HeadlessPlatformDelegate> platform_delegate_;
+ 
+   int exit_code_ = 0;
++  bool did_shutdown_ = false;
+ 
+   std::unique_ptr<os_crypt_async::OSCryptAsync> os_crypt_async_;
+ 
