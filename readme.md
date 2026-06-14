@@ -27,6 +27,12 @@ Carbonyl originally started as [`html2svg`](https://github.com/fathyb/html2svg) 
 > Carboxyl now has a dedicated Chromium build server provided by [Lysator](https://www.lysator.liu.se/)!
 > See [this issue](https://github.com/carboxyl-rs/carboxyl/issues/9) for details.
 
+> Join the Carboxyl community on [Discord](https://discord.gg/jzun3aN2ak).
+>
+> <a href="https://discord.gg/jzun3aN2ak">
+>  <img alt="Join the Discord server" src="https://img.shields.io/badge/Discord-Join%20server-5865F2?logo=discord&logoColor=white">
+> </a>
+
 ## Usage
 
 > Carboxyl on Linux without Docker requires the same dependencies as Chromium.
