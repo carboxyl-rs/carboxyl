@@ -2,7 +2,9 @@ use color_eyre::eyre::Result;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::output::{BrowserWidget, NavWidget, TextOverlay};
+use crate::output::{BrowserWidget, NavWidget};
+#[cfg(feature = "native-text")]
+use crate::output::TextOverlay;
 
 use super::app_state::AppState;
 use super::timing::RenderConfig;
@@ -21,14 +23,13 @@ pub fn draw_frame(
         let [nav_area, browser_area] =
             Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(f.area());
 
-        // NavWidget is Copy (holds only &NavState), so we create it once and
-        // reuse the same value for both rendering and cursor placement.
         let nav = NavWidget::new(&app.nav);
         f.render_widget(nav, nav_area);
 
         if let Some(frame) = app.frame.as_ref() {
             f.render_widget(BrowserWidget::new(frame, cfg.true_color), browser_area);
 
+            #[cfg(feature = "native-text")]
             if cfg.native_text && !app.text_nodes.is_empty() {
                 let pixels = Some((frame.pixels.as_slice(), frame.size.x, frame.size.y));
                 f.render_widget(

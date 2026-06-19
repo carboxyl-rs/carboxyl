@@ -6,7 +6,9 @@ use servo::{
 };
 use url::Url;
 
-use super::events::{DelegateEvent, RuntimeEvent, ServoCommand};
+use super::events::{DelegateEvent, RuntimeEvent};
+#[cfg(feature = "native-text")]
+use super::events::ServoCommand;
 
 // ---------------------------------------------------------------------------
 // WebView delegate — pure event emitter, owns nothing
@@ -14,7 +16,9 @@ use super::events::{DelegateEvent, RuntimeEvent, ServoCommand};
 
 pub struct TerminalWebViewDelegate {
     pub event_tx: mpsc::SyncSender<RuntimeEvent>,
+    #[cfg(feature = "native-text")]
     pub servo_tx: mpsc::SyncSender<ServoCommand>,
+    #[cfg(feature = "native-text")]
     pub native_text: bool,
 }
 
@@ -73,18 +77,18 @@ impl WebViewDelegate for TerminalWebViewDelegate {
         );
     }
 
-    fn notify_load_status_changed(&self, _: WebView, status: LoadStatus) {
-        if !self.native_text {
-            return;
-        }
-        match status {
-            LoadStatus::HeadParsed => {
-                let _ = self.servo_tx.try_send(ServoCommand::SuppressText);
+    fn notify_load_status_changed(&self, _: WebView, _status: LoadStatus) {
+        #[cfg(feature = "native-text")]
+        if self.native_text {
+            match _status {
+                LoadStatus::HeadParsed => {
+                    let _ = self.servo_tx.try_send(ServoCommand::SuppressText);
+                }
+                LoadStatus::Complete => {
+                    let _ = self.event_tx.try_send(RuntimeEvent::TextExtractRequested);
+                }
+                _ => {}
             }
-            LoadStatus::Complete => {
-                let _ = self.event_tx.try_send(RuntimeEvent::TextExtractRequested);
-            }
-            _ => {}
         }
     }
 }

@@ -1,4 +1,6 @@
-use crate::output::{BrowserFrame, NavState, NavigationCapability, TextNode, Window};
+use crate::output::{BrowserFrame, NavState, NavigationCapability, Window};
+#[cfg(feature = "native-text")]
+use crate::output::TextNode;
 
 use super::{events::DelegateEvent, geometry::BrowserPoint};
 
@@ -14,6 +16,7 @@ pub struct AppState {
     pub nav: NavState,
     pub pointer: BrowserPoint,
     pub frame: Option<BrowserFrame>,
+    #[cfg(feature = "native-text")]
     pub text_nodes: Vec<TextNode>,
 }
 
@@ -26,6 +29,7 @@ impl AppState {
             nav: NavState::default(),
             pointer: BrowserPoint::default(),
             frame: None,
+            #[cfg(feature = "native-text")]
             text_nodes: Vec::new(),
         }
     }
@@ -99,10 +103,9 @@ impl AppState {
         None
     }
 
-    pub fn apply_text_nodes(&mut self, nodes: Vec<TextNode>, native_text: bool) {
-        if native_text {
-            self.text_nodes = nodes;
-            self.mark_dirty();
-        }
+    #[cfg(feature = "native-text")]
+    pub fn apply_text_nodes(&mut self, nodes: Vec<TextNode>) {
+        self.text_nodes = nodes;
+        self.mark_dirty();
     }
 }

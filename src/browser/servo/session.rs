@@ -62,6 +62,7 @@ impl Session {
     fn new(channels: Channels, browser_cfg: &BrowserConfig) -> Self {
         let cfg = RenderConfig::new(
             browser_cfg.true_color,
+            #[cfg(feature = "native-text")]
             browser_cfg.native_text,
             browser_cfg.fps,
         );
@@ -99,9 +100,14 @@ impl Session {
                 let batch_scroll =
                     dispatch::drain_pending_inputs(&self.event_rx, &self.servo_tx, &mut self.app);
 
+                #[cfg(feature = "native-text")]
                 if (is_scroll || batch_scroll) && self.cfg.native_text {
                     self.schedule_extract();
                 }
+
+                // Suppress unused-variable warnings when feature is off.
+                #[cfg(not(feature = "native-text"))]
+                let _ = (is_scroll, batch_scroll);
 
                 self.app.mark_dirty();
             }
@@ -113,6 +119,7 @@ impl Session {
                     }
                     self.timing.mark_paint_cmd();
                 }
+                #[cfg(feature = "native-text")]
                 self.maybe_schedule_extract();
             }
 
@@ -125,6 +132,7 @@ impl Session {
                 {
                     log::trace!("resize command dropped — servo channel at capacity");
                 }
+                #[cfg(feature = "native-text")]
                 self.maybe_schedule_extract();
             }
 
@@ -137,13 +145,16 @@ impl Session {
                     let _ = write!(io::stdout(), "\x1b]0;{title}\x07");
                     let _ = io::stdout().flush();
                 }
+                #[cfg(feature = "native-text")]
                 self.timing.invalidate_extract();
             }
 
+            #[cfg(feature = "native-text")]
             RuntimeEvent::TextNodes(nodes) => {
-                self.app.apply_text_nodes(nodes, self.cfg.native_text);
+                self.app.apply_text_nodes(nodes);
             }
 
+            #[cfg(feature = "native-text")]
             RuntimeEvent::TextExtractRequested => {
                 if self.cfg.native_text {
                     self.schedule_extract();
@@ -163,6 +174,7 @@ impl Session {
         Ok(())
     }
 
+    #[cfg(feature = "native-text")]
     fn schedule_extract(&mut self) {
         if self.servo_tx.try_send(ServoCommand::ExtractText).is_err() {
             log::trace!("extract command dropped — servo channel at capacity");
@@ -170,6 +182,7 @@ impl Session {
         self.timing.mark_extracted();
     }
 
+    #[cfg(feature = "native-text")]
     fn maybe_schedule_extract(&mut self) {
         if self.cfg.native_text && self.timing.extract_due() {
             self.schedule_extract();

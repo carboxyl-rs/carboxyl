@@ -1,9 +1,4 @@
-//! Terminal-native text overlay.
-//!
-//! After each page load and on scroll/resize, the Servo thread evaluates a
-//! JavaScript snippet that collects all visible text nodes (including input
-//! field values) with their bounding boxes and computed styles. The results
-//! are forwarded to the main loop as `RuntimeEvent::TextNodes`.
+//! Terminal-native text overlay renderer.
 //!
 //! `TextOverlay` replaces the pixel cells where text exists with native
 //! terminal glyphs, sampling the pixel buffer for the background color so
@@ -16,7 +11,6 @@ use ratatui::{
     style::{Color, Style},
     widgets::Widget,
 };
-use servo::JSValue;
 use unicode_width::UnicodeWidthChar;
 
 use super::color::{LUMA_B, LUMA_G, LUMA_R, MAX_LUMA, to_terminal_color};
@@ -25,13 +19,7 @@ use super::color::{LUMA_B, LUMA_G, LUMA_R, MAX_LUMA, to_terminal_color};
 // Contrast constants
 // ---------------------------------------------------------------------------
 
-/// Minimum luma difference (on the 0..=MAX_LUMA pre-shift scale) required
-/// to consider foreground/background contrast acceptable.
-/// Empirically tuned: small enough not to reject valid dim colors, large
-/// enough to prevent near-invisible text.
 const MIN_CONTRAST: u32 = 6_000;
-
-/// Luma threshold for the black-vs-white fallback. Half of MAX_LUMA.
 const MID_LUMA: u32 = MAX_LUMA / 2;
 
 // ---------------------------------------------------------------------------
@@ -48,90 +36,8 @@ pub struct TextNode {
     pub y: f32,
     pub width: f32,
     pub height: f32,
-    /// Foreground color from `getComputedStyle().color` read while the
-    /// suppress stylesheet is temporarily disabled.
+    /// Foreground color from `getComputedStyle().color`.
     pub color: Color,
-}
-
-/// Parse a `JSValue::Array` of objects returned by the extraction script.
-pub fn parse_js_nodes(value: &JSValue) -> Vec<TextNode> {
-    let JSValue::Array(items) = value else {
-        return vec![];
-    };
-
-    items
-        .iter()
-        .filter_map(|item| {
-            let JSValue::Object(map) = item else {
-                return None;
-            };
-
-            let text = str_field(map, "t")?.trim().to_owned();
-            if text.is_empty() {
-                return None;
-            }
-
-            let x = f32_field(map, "x")?;
-            let y = f32_field(map, "y")?;
-            let w = f32_field(map, "w")?;
-            let h = f32_field(map, "h")?;
-
-            if w <= 0.0 || h <= 0.0 || x < 0.0 || y < 0.0 {
-                return None;
-            }
-
-            let color = str_field(map, "c")
-                .and_then(parse_css_color)
-                .unwrap_or(Color::Reset);
-
-            Some(TextNode {
-                text,
-                x,
-                y,
-                width: w,
-                height: h,
-                color,
-            })
-        })
-        .collect()
-}
-
-fn str_field<'a>(
-    map: &'a std::collections::HashMap<String, JSValue>,
-    key: &str,
-) -> Option<&'a str> {
-    match map.get(key)? {
-        JSValue::String(s) => Some(s.as_str()),
-        _ => None,
-    }
-}
-
-fn f32_field(map: &std::collections::HashMap<String, JSValue>, key: &str) -> Option<f32> {
-    match map.get(key)? {
-        JSValue::Number(n) => Some(*n as f32),
-        _ => None,
-    }
-}
-
-/// Parse CSS `rgb(r, g, b)` or `rgba(r, g, b, a)`.
-///
-/// The extraction script temporarily disables the suppress stylesheet before
-/// reading `getComputedStyle().color`, so the values here are the page's
-/// authored colors. Alpha is ignored — semi-transparent text is rendered
-/// opaque in the terminal.
-fn parse_css_color(s: &str) -> Option<Color> {
-    let inner = s
-        .trim()
-        .strip_prefix("rgba(")
-        .or_else(|| s.trim().strip_prefix("rgb("))?
-        .strip_suffix(')')?;
-
-    let mut parts = inner.split(',').map(|p| p.trim());
-    let r: u8 = parts.next()?.parse().ok()?;
-    let g: u8 = parts.next()?.parse().ok()?;
-    let b: u8 = parts.next()?.parse().ok()?;
-
-    Some(Color::Rgb(r, g, b))
 }
 
 // ---------------------------------------------------------------------------
@@ -157,12 +63,7 @@ impl<'a> TextOverlay<'a> {
         pixels: Option<(&'a [u8], u32, u32)>,
         true_color: bool,
     ) -> Self {
-        Self {
-            nodes,
-            cell_pixels,
-            pixels,
-            true_color,
-        }
+        Self { nodes, cell_pixels, pixels, true_color }
     }
 }
 
@@ -175,9 +76,7 @@ impl Widget for TextOverlay<'_> {
         let grid_w = area.width as usize;
         let grid_h = area.height as usize;
 
-        // Flat occupied bitmap indexed by (relative_row * grid_w + relative_col).
-        // Avoids per-character hashing; terminal dimensions keep this under ~30 KB.
-        // Earlier nodes in DOM order take priority.
+        // Flat occupied bitmap: earlier DOM nodes take priority.
         let mut occupied = vec![false; grid_w * grid_h];
 
         for node in self.nodes {
@@ -212,7 +111,6 @@ impl Widget for TextOverlay<'_> {
                 continue;
             }
 
-            // Mark cells occupied (relative coordinates) before the next node runs.
             let mut cur = col as usize;
             for ch in text.chars() {
                 let w = ch.width().unwrap_or(0);
@@ -230,12 +128,6 @@ impl Widget for TextOverlay<'_> {
     }
 }
 
-/// Truncate `s` to fit within `max_cols` display columns, stopping early at
-/// the first cell already claimed by a previously rendered node.
-///
-/// Uses relative `(col, row)` coordinates and a flat occupied bitmap so
-/// lookups are simple array reads with no hashing. Wide characters (e.g. CJK,
-/// width = 2) are rejected if ANY of their cells is occupied.
 fn truncate_to_available(
     s: &str,
     col: usize,
@@ -265,7 +157,6 @@ fn truncate_to_available(
     result
 }
 
-/// Sample the center pixel of a terminal cell from the RGBA8888 pixel buffer.
 fn sample_cell_bg(
     pixels: &[u8],
     pw: u32,
@@ -274,13 +165,12 @@ fn sample_cell_bg(
     row: u16,
     cell_pixels: Vec2,
 ) -> Option<(u8, u8, u8)> {
-    // Center of the cell in pixel coordinates.
     let px = ((col as f32 + 0.5) * cell_pixels.x) as usize;
     let py = ((row as f32 + 0.5) * cell_pixels.y) as usize;
 
     let x = px.min(pw as usize - 1);
     let y = py.min(ph as usize - 1);
-    let idx = (y * pw as usize + x) * 4; // ×4 for RGBA bytes per pixel
+    let idx = (y * pw as usize + x) * 4;
 
     if idx + 2 >= pixels.len() {
         return None;
@@ -289,9 +179,6 @@ fn sample_cell_bg(
     Some((pixels[idx], pixels[idx + 1], pixels[idx + 2]))
 }
 
-/// Ensure adequate contrast between `fg` and `bg`.
-/// Falls back to pure black or white based on background luminance when the
-/// two colors are too close to be readable.
 fn ensure_contrast(fg: Color, bg: Color) -> Color {
     let (fr, fg_g, fb) = rgb_of(fg);
     let (br, bg_g, bb) = rgb_of(bg);
@@ -303,23 +190,12 @@ fn ensure_contrast(fg: Color, bg: Color) -> Color {
         return fg;
     }
 
-    if bg_luma > MID_LUMA {
-        Color::Black
-    } else {
-        Color::White
-    }
+    if bg_luma > MID_LUMA { Color::Black } else { Color::White }
 }
 
-/// Decompose any ratatui [`Color`] into its `(r, g, b)` triple.
-///
-/// Named terminal colors are mapped to their conventional ANSI RGB values.
-/// `Color::Reset` and indexed colors outside the 6×6×6 cube are treated as
-/// mid-gray, keeping contrast logic conservative rather than silent.
 fn rgb_of(color: Color) -> (u8, u8, u8) {
     match color {
         Color::Rgb(r, g, b) => (r, g, b),
-
-        // Standard ANSI named colors (conventional sRGB approximations).
         Color::Black => (0, 0, 0),
         Color::Red => (170, 0, 0),
         Color::Green => (0, 170, 0),
@@ -336,34 +212,6 @@ fn rgb_of(color: Color) -> (u8, u8, u8) {
         Color::LightMagenta => (255, 85, 255),
         Color::LightCyan => (85, 255, 255),
         Color::White => (255, 255, 255),
-
-        // Indexed and Reset: conservatively mid-gray so contrast check errs
-        // toward the black/white fallback rather than passing an unknown color.
         Color::Indexed(_) | Color::Reset => (128, 128, 128),
     }
 }
-
-// ---------------------------------------------------------------------------
-// JavaScript integration
-// ---------------------------------------------------------------------------
-
-/// Injected once per page load (on `LoadStatus::HeadParsed`) to make all text
-/// transparent in Servo's pixel render. Layout and bounding boxes are fully
-/// preserved — only the paint color changes — so `EXTRACTION_SCRIPT` still
-/// returns accurate positions for the native terminal text overlay.
-///
-/// A sentinel attribute (`data-carboxyl-suppress`) guards against duplicate
-/// injection on pages that fire multiple load-complete notifications.
-pub const SUPPRESS_TEXT_SCRIPT: &str = include_str!("suppress.js");
-
-/// Evaluates on the page and returns an Array of Objects with fields:
-/// `t` (text), `x`, `y`, `w`, `h` (viewport-relative CSS px, content-box
-/// origin), `c` (CSS color read with suppression temporarily disabled).
-///
-/// Covers:
-/// - Regular text nodes via TreeWalker
-/// - `<button>` and `<select>` elements
-/// - `<input>` and `<textarea>` values
-/// - `[contenteditable]` elements
-/// - Filters: off-screen, zero-size, hidden, occluded, whitespace-only
-pub const EXTRACTION_SCRIPT: &str = include_str!("extract.js");

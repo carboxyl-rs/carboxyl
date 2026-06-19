@@ -4,19 +4,20 @@ use std::thread;
 use std::time::Duration;
 
 use dpi::PhysicalSize;
-use log::{error, warn};
+use log::error;
 use servo::{
-    DeviceIntPoint, DeviceIntRect, DeviceIntSize, JavaScriptEvaluationError, Preferences,
-    RenderingContext, ServoBuilder, SoftwareRenderingContext, WebView, WebViewBuilder,
-    WebViewDelegate,
+    DeviceIntPoint, DeviceIntRect, DeviceIntSize, Preferences, RenderingContext, ServoBuilder,
+    SoftwareRenderingContext, WebView, WebViewBuilder, WebViewDelegate,
 };
 use url::Url;
 
-use crate::output::{BrowserFrame, EXTRACTION_SCRIPT, SUPPRESS_TEXT_SCRIPT, parse_js_nodes};
+use crate::output::BrowserFrame;
 
 use super::delegates::{TerminalServoDelegate, TerminalWebViewDelegate};
 use super::events::{RuntimeEvent, ServoCommand};
 use super::waker::ServoWaker;
+#[cfg(feature = "native-text")]
+use super::native_text;
 
 // ---------------------------------------------------------------------------
 // Timing constants
@@ -41,7 +42,9 @@ const SERVO_SPIN_SLEEP: Duration = Duration::from_millis(1);
 struct PendingOps {
     shutdown: bool,
     paint: bool,
+    #[cfg(feature = "native-text")]
     extract: bool,
+    #[cfg(feature = "native-text")]
     suppress: bool,
     resize: Option<PhysicalSize<u32>>,
 }
@@ -67,7 +70,9 @@ impl PendingOps {
                 webview.notify_input_event(ev);
             }
             ServoCommand::Paint => self.paint = true,
+            #[cfg(feature = "native-text")]
             ServoCommand::ExtractText => self.extract = true,
+            #[cfg(feature = "native-text")]
             ServoCommand::SuppressText => self.suppress = true,
         }
     }
@@ -83,7 +88,7 @@ pub fn servo_thread(
     servo_rx: mpsc::Receiver<ServoCommand>,
     url: Url,
     browser_size: PhysicalSize<u32>,
-    native_text: bool,
+    #[cfg(feature = "native-text")] native_text: bool,
 ) {
     let servo = ServoBuilder::default()
         .preferences(browser_preferences(Preferences::default()))
@@ -104,7 +109,9 @@ pub fn servo_thread(
 
     let delegate: Rc<dyn WebViewDelegate> = Rc::new(TerminalWebViewDelegate {
         event_tx: event_tx.clone(),
+        #[cfg(feature = "native-text")]
         servo_tx: servo_tx.clone(),
+        #[cfg(feature = "native-text")]
         native_text,
     });
 
@@ -130,21 +137,21 @@ pub fn servo_thread(
         }
 
         if let Some(size) = ops.resize {
-            rendering_context.resize(size);
             webview.resize(size);
-            ops.paint = true;
         }
 
         servo.spin_event_loop();
 
         // Suppress first so Servo repaints with transparent text before we
         // extract node positions — guarantees the two are always paired.
+        #[cfg(feature = "native-text")]
         if ops.suppress {
-            suppress_text(&webview);
+            native_text::suppress(&webview);
         }
 
+        #[cfg(feature = "native-text")]
         if ops.extract {
-            extract_text(&webview, event_tx.clone());
+            native_text::extract(&webview, event_tx.clone());
         }
 
         if ops.paint
@@ -160,32 +167,6 @@ pub fn servo_thread(
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
-
-fn suppress_text(webview: &WebView) {
-    webview.evaluate_javascript(SUPPRESS_TEXT_SCRIPT, |result| {
-        if let Err(e) = result
-            && !matches!(e, JavaScriptEvaluationError::WebViewNotReady)
-        {
-            warn!("text suppression failed: {e:?}");
-        }
-    });
-}
-
-fn extract_text(webview: &WebView, event_tx: mpsc::SyncSender<RuntimeEvent>) {
-    webview.evaluate_javascript(EXTRACTION_SCRIPT, move |result| match result {
-        Ok(value) => {
-            let nodes = parse_js_nodes(&value);
-            if !nodes.is_empty() {
-                let _ = event_tx.try_send(RuntimeEvent::TextNodes(nodes));
-            }
-        }
-        Err(e) => {
-            if !matches!(e, JavaScriptEvaluationError::WebViewNotReady) {
-                warn!("text extraction failed: {e:?}");
-            }
-        }
-    });
-}
 
 fn paint(webview: &WebView, ctx: &dyn RenderingContext) -> Option<BrowserFrame> {
     use glam::UVec2;

@@ -20,13 +20,13 @@ pub struct Cli {
     /// Higher values zoom in and make page content larger.
     /// Lower values zoom out and show more content at once.
     #[arg(short = 's', long = "scale", default_value_t = 100)]
-    // resize in runtime with alacritty ctrl +/-, not a _feature_ though
     pub scale: u16,
 
     /// Disable native terminal text rendering.
     /// By default, text is extracted from the page and rendered using the
     /// terminal's own glyph pipeline for crisp, resolution-independent output.
     /// Pass this flag to use the pixel-only renderer instead.
+    #[cfg(feature = "native-text")]
     #[arg(long = "no-native-text", action = ArgAction::SetTrue)]
     pub no_native_text: bool,
 
