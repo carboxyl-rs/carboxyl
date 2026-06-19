@@ -51,7 +51,7 @@ const BASE_CELL_PX: Vec2 = Vec2::new(6.5, 13.0);
 const NAV_BAR_ROWS: u16 = 1;
 
 /// Snapshot of the terminal window dimensions, derived from `TIOCGWINSZ`
-/// and the CLI scale setting. Cheap to clone — passed around by value.
+/// and the CLI scale setting. Cheap to clone - passed around by value.
 #[derive(Clone, Debug)]
 pub struct Window {
     /// Terminal size in cells (nav bar row excluded).
@@ -103,7 +103,7 @@ impl Window {
     }
 
     /// Produce an updated `Window` for a terminal resize event.
-    /// Reuses `cell_pixels` from the current window — only cell count changes.
+    /// Reuses `cell_pixels` from the current window - only cell count changes.
     pub fn resize(&self, cols: u16, rows: u16) -> Self {
         let cells = UVec2::new(cols as u32, rows.saturating_sub(NAV_BAR_ROWS) as u32);
         let browser = UVec2::new(

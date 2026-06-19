@@ -85,7 +85,7 @@ pub struct NavState {
 impl Default for NavState {
     fn default() -> Self {
         Self {
-            // about:blank is always valid — unwrap is safe.
+            // about:blank is always valid - unwrap is safe.
             url: Url::parse("about:blank").unwrap(),
             staged: None,
             nav: NavigationCapability::default(),

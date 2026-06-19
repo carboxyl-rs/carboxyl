@@ -54,6 +54,9 @@ pub struct TextOverlay<'a> {
     /// Raw RGBA8888 pixel data from the last frame, with frame dimensions.
     pixels: Option<(&'a [u8], u32, u32)>,
     true_color: bool,
+    /// Reusable scratch buffer for the occupied-cell bitmap; cleared and
+    /// resized on each render to avoid a per-frame heap allocation.
+    occupied: &'a mut Vec<bool>,
 }
 
 impl<'a> TextOverlay<'a> {
@@ -62,8 +65,15 @@ impl<'a> TextOverlay<'a> {
         cell_pixels: Vec2,
         pixels: Option<(&'a [u8], u32, u32)>,
         true_color: bool,
+        occupied: &'a mut Vec<bool>,
     ) -> Self {
-        Self { nodes, cell_pixels, pixels, true_color }
+        Self {
+            nodes,
+            cell_pixels,
+            pixels,
+            true_color,
+            occupied,
+        }
     }
 }
 
@@ -76,8 +86,10 @@ impl Widget for TextOverlay<'_> {
         let grid_w = area.width as usize;
         let grid_h = area.height as usize;
 
-        // Flat occupied bitmap: earlier DOM nodes take priority.
-        let mut occupied = vec![false; grid_w * grid_h];
+        // Reuse the caller-supplied buffer to avoid a per-frame allocation.
+        // Earlier DOM nodes take priority (bitmap marks cells as occupied).
+        self.occupied.clear();
+        self.occupied.resize(grid_w * grid_h, false);
 
         for node in self.nodes {
             let col = (node.x / self.cell_pixels.x).floor() as u16;
@@ -104,7 +116,7 @@ impl Widget for TextOverlay<'_> {
                 col as usize,
                 row as usize,
                 max_cols,
-                &occupied,
+                self.occupied,
                 grid_w,
             );
             if text.is_empty() {
@@ -116,8 +128,8 @@ impl Widget for TextOverlay<'_> {
                 let w = ch.width().unwrap_or(0);
                 for i in 0..w {
                     let idx = row as usize * grid_w + cur + i;
-                    if idx < occupied.len() {
-                        occupied[idx] = true;
+                    if idx < self.occupied.len() {
+                        self.occupied[idx] = true;
                     }
                 }
                 cur += w;
@@ -190,7 +202,11 @@ fn ensure_contrast(fg: Color, bg: Color) -> Color {
         return fg;
     }
 
-    if bg_luma > MID_LUMA { Color::Black } else { Color::White }
+    if bg_luma > MID_LUMA {
+        Color::Black
+    } else {
+        Color::White
+    }
 }
 
 fn rgb_of(color: Color) -> (u8, u8, u8) {

@@ -1,6 +1,6 @@
-use crate::output::{BrowserFrame, NavState, NavigationCapability, Window};
 #[cfg(feature = "native-text")]
 use crate::output::TextNode;
+use crate::output::{BrowserFrame, NavState, NavigationCapability, Window};
 
 use super::{events::DelegateEvent, geometry::BrowserPoint};
 
@@ -18,6 +18,8 @@ pub struct AppState {
     pub frame: Option<BrowserFrame>,
     #[cfg(feature = "native-text")]
     pub text_nodes: Vec<TextNode>,
+    #[cfg(feature = "native-text")]
+    pub occupied_cells: Vec<bool>,
 }
 
 impl AppState {
@@ -31,6 +33,8 @@ impl AppState {
             frame: None,
             #[cfg(feature = "native-text")]
             text_nodes: Vec::new(),
+            #[cfg(feature = "native-text")]
+            occupied_cells: Vec::new(),
         }
     }
 
@@ -65,7 +69,7 @@ impl AppState {
     }
 
     /// Mutates nav state. Returns `Some(title)` when the terminal title OSC
-    /// sequence should be emitted — keeping that I/O side-effect out of here.
+    /// sequence should be emitted - keeping that I/O side-effect out of here.
     pub fn apply_delegate(&mut self, ev: DelegateEvent) -> Option<String> {
         match ev {
             DelegateEvent::UrlChanged(url) => {

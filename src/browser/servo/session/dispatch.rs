@@ -143,7 +143,7 @@ pub fn drain_pending_inputs(
 // ---------------------------------------------------------------------------
 
 /// Translate a navigation action into Servo commands or a URL load.
-/// URL parse errors are logged as warnings and otherwise ignored — there is
+/// URL parse errors are logged as warnings and otherwise ignored - there is
 /// no meaningful way to surface them to the user from this call site.
 fn dispatch_nav(action: NavAction, servo_tx: &mpsc::SyncSender<ServoCommand>) {
     match action {

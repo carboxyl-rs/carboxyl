@@ -6,12 +6,12 @@ use servo::{
 };
 use url::Url;
 
-use super::events::{DelegateEvent, RuntimeEvent};
 #[cfg(feature = "native-text")]
 use super::events::ServoCommand;
+use super::events::{DelegateEvent, RuntimeEvent};
 
 // ---------------------------------------------------------------------------
-// WebView delegate — pure event emitter, owns nothing
+// WebView delegate - pure event emitter, owns nothing
 // ---------------------------------------------------------------------------
 
 pub struct TerminalWebViewDelegate {

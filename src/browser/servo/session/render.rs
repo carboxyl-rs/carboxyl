@@ -2,9 +2,9 @@ use color_eyre::eyre::Result;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::output::{BrowserWidget, NavWidget};
 #[cfg(feature = "native-text")]
 use crate::output::TextOverlay;
+use crate::output::{BrowserWidget, NavWidget};
 
 use super::app_state::AppState;
 use super::timing::RenderConfig;
@@ -16,7 +16,7 @@ use super::timing::RenderConfig;
 /// Compose and flush one TUI frame.
 pub fn draw_frame(
     terminal: &mut DefaultTerminal,
-    app: &AppState,
+    app: &mut AppState,
     cfg: &RenderConfig,
 ) -> Result<()> {
     terminal.draw(|f: &mut Frame| {
@@ -38,6 +38,7 @@ pub fn draw_frame(
                         app.window.cell_pixels,
                         pixels,
                         cfg.true_color,
+                        &mut app.occupied_cells,
                     ),
                     browser_area,
                 );

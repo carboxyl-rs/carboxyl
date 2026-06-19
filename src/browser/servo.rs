@@ -58,7 +58,7 @@ pub struct BrowserConfig {
 }
 
 impl BrowserConfig {
-    /// `log_path` must be initialized before this call — use
+    /// `log_path` must be initialized before this call - use
     /// `logger::init_logger` in `main` and pass the result in.
     pub fn from_cli(cli: &Cli, log_path: Option<PathBuf>) -> Result<Self> {
         Ok(Self {

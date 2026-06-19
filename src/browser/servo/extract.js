@@ -64,7 +64,7 @@
 
     // Temporarily disable the carboxyl text-suppression stylesheet so that
     // getComputedStyle().color returns the page's authored colors instead of
-    // the transparent override.  Layout is unaffected — `color: transparent`
+    // the transparent override.  Layout is unaffected - `color: transparent`
     // has no effect on geometry or getBoundingClientRect() values.
     const suppressEl = document.getElementById('carboxyl-text-suppress');
     const suppressSheet = suppressEl && suppressEl.sheet;

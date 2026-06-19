@@ -14,7 +14,11 @@ pub struct RenderConfig {
 }
 
 impl RenderConfig {
-    pub fn new(true_color: bool, #[cfg(feature = "native-text")] native_text: bool, fps: u16) -> Self {
+    pub fn new(
+        true_color: bool,
+        #[cfg(feature = "native-text")] native_text: bool,
+        fps: u16,
+    ) -> Self {
         Self {
             true_color,
             #[cfg(feature = "native-text")]

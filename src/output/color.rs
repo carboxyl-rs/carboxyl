@@ -11,15 +11,15 @@ use ratatui::style::Color;
 // ---------------------------------------------------------------------------
 
 /// BT.601 luma coefficient for red, scaled by 256.
-/// Exact: 0.299 × 256 = 76.544 — rounded to 77.
+/// Exact: 0.299 × 256 = 76.544 - rounded to 77.
 pub const LUMA_R: u32 = 77;
 
 /// BT.601 luma coefficient for green, scaled by 256.
-/// Exact: 0.587 × 256 = 150.272 — rounded to 150.
+/// Exact: 0.587 × 256 = 150.272 - rounded to 150.
 pub const LUMA_G: u32 = 150;
 
 /// BT.601 luma coefficient for blue, scaled by 256.
-/// Exact: 0.114 × 256 = 29.184 — rounded to 29.
+/// Exact: 0.114 × 256 = 29.184 - rounded to 29.
 pub const LUMA_B: u32 = 29;
 
 /// Right-shift amount that undoes the ×256 fixed-point scale, recovering
@@ -28,6 +28,9 @@ pub const LUMA_SHIFT: u32 = 8;
 
 /// Maximum luma value on the pre-shift scale: white = 255 × (77 + 150 + 29)
 /// = 255 × 256 = 65 280.
+// Only consumed by output/native_text.rs, which is compiled only with the
+// native-text feature; unconditional so the constant is always available.
+#[allow(dead_code)]
 pub const MAX_LUMA: u32 = 255 * (LUMA_R + LUMA_G + LUMA_B);
 
 // ---------------------------------------------------------------------------

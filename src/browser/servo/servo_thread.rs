@@ -15,9 +15,9 @@ use crate::output::BrowserFrame;
 
 use super::delegates::{TerminalServoDelegate, TerminalWebViewDelegate};
 use super::events::{RuntimeEvent, ServoCommand};
-use super::waker::ServoWaker;
 #[cfg(feature = "native-text")]
 use super::native_text;
+use super::waker::ServoWaker;
 
 // ---------------------------------------------------------------------------
 // Timing constants
@@ -29,7 +29,7 @@ use super::native_text;
 const SERVO_SPIN_SLEEP: Duration = Duration::from_millis(1);
 
 // ---------------------------------------------------------------------------
-// PendingOps — batch-accumulates commands drained from the servo channel
+// PendingOps - batch-accumulates commands drained from the servo channel
 // ---------------------------------------------------------------------------
 
 /// Flags and deferred data accumulated while draining the command queue in
@@ -143,10 +143,15 @@ pub fn servo_thread(
         servo.spin_event_loop();
 
         // Suppress first so Servo repaints with transparent text before we
-        // extract node positions — guarantees the two are always paired.
+        // extract node positions - guarantees the two are always paired.
+        // Skip paint this cycle when suppress fires: the JS won't execute
+        // until the next spin, so painting now would capture un-suppressed
+        // pixels. The following notify_new_frame_ready → Wake → Paint cycle
+        // will capture the correctly suppressed frame.
         #[cfg(feature = "native-text")]
         if ops.suppress {
             native_text::suppress(&webview);
+            ops.paint = false;
         }
 
         #[cfg(feature = "native-text")]

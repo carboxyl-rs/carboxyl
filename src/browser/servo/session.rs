@@ -82,7 +82,7 @@ impl Session {
                 Ok(ev) => self.handle_event(ev),
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    log::error!("event channel disconnected — servo thread may have crashed");
+                    log::error!("event channel disconnected - servo thread may have crashed");
                     break;
                 }
             }
@@ -115,7 +115,7 @@ impl Session {
             RuntimeEvent::Wake => {
                 if self.timing.paint_cmd_due(self.cfg.frame_budget) {
                     if self.servo_tx.try_send(ServoCommand::Paint).is_err() {
-                        log::trace!("paint command dropped — servo channel at capacity");
+                        log::trace!("paint command dropped - servo channel at capacity");
                     }
                     self.timing.mark_paint_cmd();
                 }
@@ -130,10 +130,13 @@ impl Session {
                         .try_send(ServoCommand::Resize(physical_size(new_window.browser)))
                         .is_err()
                 {
-                    log::trace!("resize command dropped — servo channel at capacity");
+                    log::trace!("resize command dropped - servo channel at capacity");
                 }
                 #[cfg(feature = "native-text")]
-                self.maybe_schedule_extract();
+                {
+                    self.timing.invalidate_extract();
+                    self.maybe_schedule_extract();
+                }
             }
 
             RuntimeEvent::Frame(f) => {
@@ -169,7 +172,7 @@ impl Session {
         if self.app.pending_paint && self.timing.draw_due(self.cfg.frame_budget) {
             self.app.pending_paint = false;
             self.timing.mark_drawn();
-            render::draw_frame(&mut self.terminal, &self.app, &self.cfg)?;
+            render::draw_frame(&mut self.terminal, &mut self.app, &self.cfg)?;
         }
         Ok(())
     }
@@ -177,7 +180,7 @@ impl Session {
     #[cfg(feature = "native-text")]
     fn schedule_extract(&mut self) {
         if self.servo_tx.try_send(ServoCommand::ExtractText).is_err() {
-            log::trace!("extract command dropped — servo channel at capacity");
+            log::trace!("extract command dropped - servo channel at capacity");
         }
         self.timing.mark_extracted();
     }

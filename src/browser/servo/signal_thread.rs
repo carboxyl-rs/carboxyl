@@ -18,7 +18,7 @@ pub fn spawn_signal_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHa
         };
 
         // One signal is enough to trigger a clean shutdown; we don't need to
-        // handle subsequent signals — the process will exit imminently.
+        // handle subsequent signals - the process will exit imminently.
         if let Some(sig) = signals.forever().next() {
             warn!("received signal {sig}, shutting down");
             let _ = tx.try_send(RuntimeEvent::Exit);

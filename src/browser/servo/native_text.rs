@@ -13,7 +13,7 @@ use super::events::RuntimeEvent;
 // ---------------------------------------------------------------------------
 
 /// Injected once per page load to make all text transparent in Servo's pixel
-/// render. Layout is unaffected — only paint color changes — so `EXTRACTION_SCRIPT`
+/// render. Layout is unaffected - only paint color changes - so `EXTRACTION_SCRIPT`
 /// still returns accurate positions.
 pub const SUPPRESS_TEXT_SCRIPT: &str = include_str!("suppress.js");
 
@@ -56,7 +56,14 @@ pub fn parse_js_nodes(value: &JSValue) -> Vec<TextNode> {
                 .and_then(parse_css_color)
                 .unwrap_or(ratatui::style::Color::Reset);
 
-            Some(TextNode { text, x, y, width: w, height: h, color })
+            Some(TextNode {
+                text,
+                x,
+                y,
+                width: w,
+                height: h,
+                color,
+            })
         })
         .collect()
 }
@@ -109,8 +116,8 @@ pub fn extract(webview: &WebView, event_tx: mpsc::SyncSender<RuntimeEvent>) {
     webview.evaluate_javascript(EXTRACTION_SCRIPT, move |result| match result {
         Ok(value) => {
             let nodes = parse_js_nodes(&value);
-            if !nodes.is_empty() {
-                let _ = event_tx.try_send(RuntimeEvent::TextNodes(nodes));
+            if !nodes.is_empty() && event_tx.try_send(RuntimeEvent::TextNodes(nodes)).is_err() {
+                log::trace!("text nodes dropped - event channel at capacity");
             }
         }
         Err(e) => {
