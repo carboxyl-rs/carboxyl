@@ -12,16 +12,15 @@ rustls = "0.23"
 servo = "0.3"
 url = "2.5"
 clap = { version = "4", features = ["derive"] }
-ratatui = "0.30"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache"] }
 rustix = { version = "1", features = ["termios", "stdio", "process"] }
 dpi = "0.1"
-crossterm = "0.29"
 unicode-width = "0.2"
 log = "0.4"
 simplelog = "0.12"
 glam = "0.33"
 signal-hook = "0.4"
-color-eyre = "0.6"
+anyhow = "1"
 
 # release optimizations: must be used for builds
 [profile.release]

@@ -18,10 +18,12 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 
-use color_eyre::eyre::{Result, eyre};
-use crossterm::event::{
+use anyhow::{Result, anyhow};
+use ratatui::crossterm::event::{
     EnableMouseCapture, KeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
+use ratatui::crossterm::execute;
+use ratatui::crossterm::style::available_color_count;
 use rustls::crypto::CryptoProvider;
 
 use crate::cli::Cli;
@@ -64,7 +66,7 @@ impl BrowserConfig {
         Ok(Self {
             log_path,
             window: Window::read(cli),
-            true_color: u32::from(crossterm::style::available_color_count()) >= TRUE_COLOR_COUNT,
+            true_color: u32::from(available_color_count()) >= TRUE_COLOR_COUNT,
             #[cfg(feature = "native-text")]
             native_text: !cli.no_native_text,
             fps: cli.fps,
@@ -98,7 +100,7 @@ impl BrowserRuntime {
 
         let terminal = ratatui::init();
 
-        crossterm::execute!(
+        execute!(
             io::stdout(),
             EnableMouseCapture,
             PushKeyboardEnhancementFlags(
@@ -173,7 +175,7 @@ fn install_rustls_provider() -> Result<()> {
     if CryptoProvider::get_default().is_none() {
         rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
-            .map_err(|_| eyre!("failed to install rustls crypto provider"))?;
+            .map_err(|_| anyhow!("failed to install rustls crypto provider"))?;
     }
     Ok(())
 }

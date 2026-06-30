@@ -2,8 +2,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use crossterm::event::{poll as ct_poll, read as ct_read};
 use log::error;
+use ratatui::crossterm::event::{Event as CrosstermEvent, poll as ct_poll, read as ct_read};
 
 use crate::input::{self, Event};
 
@@ -40,7 +40,7 @@ pub fn spawn_input_thread(tx: mpsc::SyncSender<RuntimeEvent>) -> thread::JoinHan
                     break;
                 }
 
-                Ok(crossterm::event::Event::Resize(cols, rows)) => {
+                Ok(CrosstermEvent::Resize(cols, rows)) => {
                     let _ = tx.try_send(RuntimeEvent::Resize(cols, rows));
                 }
 

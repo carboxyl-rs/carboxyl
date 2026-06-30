@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 
 use log::warn;
+use ratatui::style::Color;
 use servo::{JSValue, JavaScriptEvaluationError, WebView};
 
 use crate::output::TextNode;
@@ -54,7 +55,7 @@ pub fn parse_js_nodes(value: &JSValue) -> Vec<TextNode> {
 
             let color = str_field(map, "c")
                 .and_then(parse_css_color)
-                .unwrap_or(ratatui::style::Color::Reset);
+                .unwrap_or(Color::Reset);
 
             Some(TextNode {
                 text,
@@ -83,7 +84,7 @@ fn f32_field(map: &HashMap<String, JSValue>, key: &str) -> Option<f32> {
 }
 
 /// Parse CSS `rgb(r, g, b)` or `rgba(r, g, b, a)`. Alpha is ignored.
-fn parse_css_color(s: &str) -> Option<ratatui::style::Color> {
+fn parse_css_color(s: &str) -> Option<Color> {
     let inner = s
         .trim()
         .strip_prefix("rgba(")
@@ -95,7 +96,7 @@ fn parse_css_color(s: &str) -> Option<ratatui::style::Color> {
     let g: u8 = parts.next()?.parse().ok()?;
     let b: u8 = parts.next()?.parse().ok()?;
 
-    Some(ratatui::style::Color::Rgb(r, g, b))
+    Some(Color::Rgb(r, g, b))
 }
 
 // ---------------------------------------------------------------------------

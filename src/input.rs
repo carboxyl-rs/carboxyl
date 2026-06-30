@@ -1,4 +1,4 @@
-use crossterm::event::{
+use ratatui::crossterm::event::{
     Event as CrosstermEvent, KeyCode, KeyEventKind, KeyModifiers,
     MouseButton as CrosstermMouseButton, MouseEvent, MouseEventKind,
 };

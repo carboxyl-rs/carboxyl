@@ -11,11 +11,12 @@ pub use native_text::{TextNode, TextOverlay};
 pub use nav_widget::{NavAction, NavState, NavWidget, NavigationCapability};
 pub use window::Window;
 
-use crossterm::event::{DisableMouseCapture, PopKeyboardEnhancementFlags};
+use ratatui::crossterm::event::{DisableMouseCapture, PopKeyboardEnhancementFlags};
+use ratatui::crossterm::execute;
 use std::io;
 
 pub fn restore_terminal() {
-    crossterm::execute!(
+    execute!(
         io::stdout(),
         PopKeyboardEnhancementFlags,
         DisableMouseCapture,

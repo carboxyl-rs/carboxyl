@@ -9,7 +9,7 @@ use std::io::{self, Write};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use color_eyre::eyre::Result;
+use anyhow::Result;
 use ratatui::DefaultTerminal;
 
 use super::BrowserConfig;

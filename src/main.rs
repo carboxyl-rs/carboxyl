@@ -1,13 +1,11 @@
+use anyhow::Result;
 use clap::Parser;
-use color_eyre::eyre::Result;
 
 use carboxyl::browser::{BrowserConfig, BrowserRuntime, run};
 use carboxyl::cli::Cli;
 use carboxyl::output::restore_terminal;
 
 fn main() -> Result<()> {
-    color_eyre::install()?;
-
     if let Err(err) = carboxyl::platform::signal::register() {
         eprintln!("warning: failed to register signal handlers: {err}");
     }

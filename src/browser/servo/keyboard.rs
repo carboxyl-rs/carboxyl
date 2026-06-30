@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, ModifierKeyCode};
 
 use servo::{
     Code, Key as ServoKey, KeyState, KeyboardEvent as ServoKeyboardEvent, Location,
@@ -182,60 +182,59 @@ fn map_key_code(code: &KeyCode) -> (ServoKey, Code, Location) {
         }
 
         KeyCode::Modifier(modifier) => match modifier {
-            crossterm::event::ModifierKeyCode::LeftShift => (
+            ModifierKeyCode::LeftShift => (
                 ServoKey::Named(NamedKey::Shift),
                 Code::ShiftLeft,
                 Location::Left,
             ),
 
-            crossterm::event::ModifierKeyCode::RightShift => (
+            ModifierKeyCode::RightShift => (
                 ServoKey::Named(NamedKey::Shift),
                 Code::ShiftRight,
                 Location::Right,
             ),
 
-            crossterm::event::ModifierKeyCode::LeftControl => (
+            ModifierKeyCode::LeftControl => (
                 ServoKey::Named(NamedKey::Control),
                 Code::ControlLeft,
                 Location::Left,
             ),
 
-            crossterm::event::ModifierKeyCode::RightControl => (
+            ModifierKeyCode::RightControl => (
                 ServoKey::Named(NamedKey::Control),
                 Code::ControlRight,
                 Location::Right,
             ),
 
-            crossterm::event::ModifierKeyCode::LeftAlt => (
+            ModifierKeyCode::LeftAlt => (
                 ServoKey::Named(NamedKey::Alt),
                 Code::AltLeft,
                 Location::Left,
             ),
 
-            crossterm::event::ModifierKeyCode::RightAlt => (
+            ModifierKeyCode::RightAlt => (
                 ServoKey::Named(NamedKey::Alt),
                 Code::AltRight,
                 Location::Right,
             ),
 
-            crossterm::event::ModifierKeyCode::LeftSuper
-            | crossterm::event::ModifierKeyCode::LeftHyper
-            | crossterm::event::ModifierKeyCode::LeftMeta => (
-                ServoKey::Named(NamedKey::Meta),
-                Code::MetaLeft,
-                Location::Left,
-            ),
+            ModifierKeyCode::LeftSuper | ModifierKeyCode::LeftHyper | ModifierKeyCode::LeftMeta => {
+                (
+                    ServoKey::Named(NamedKey::Meta),
+                    Code::MetaLeft,
+                    Location::Left,
+                )
+            }
 
-            crossterm::event::ModifierKeyCode::RightSuper
-            | crossterm::event::ModifierKeyCode::RightHyper
-            | crossterm::event::ModifierKeyCode::RightMeta => (
+            ModifierKeyCode::RightSuper
+            | ModifierKeyCode::RightHyper
+            | ModifierKeyCode::RightMeta => (
                 ServoKey::Named(NamedKey::Meta),
                 Code::MetaRight,
                 Location::Right,
             ),
 
-            crossterm::event::ModifierKeyCode::IsoLevel3Shift
-            | crossterm::event::ModifierKeyCode::IsoLevel5Shift => (
+            ModifierKeyCode::IsoLevel3Shift | ModifierKeyCode::IsoLevel5Shift => (
                 ServoKey::Named(NamedKey::AltGraph),
                 Code::AltRight,
                 Location::Right,

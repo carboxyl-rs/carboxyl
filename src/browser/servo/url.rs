@@ -3,7 +3,7 @@ use std::path::Path;
 
 use url::Url;
 
-use color_eyre::eyre::Result;
+use anyhow::Result;
 
 pub fn normalize_url(raw: Option<String>) -> Result<Url> {
     let Some(raw) = raw else {
