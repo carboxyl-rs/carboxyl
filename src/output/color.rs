@@ -38,16 +38,16 @@ pub const MAX_LUMA: u32 = 255 * (LUMA_R + LUMA_G + LUMA_B);
 // ---------------------------------------------------------------------------
 
 /// First palette index of the 6×6×6 color cube.
-/// Indices 0–15 are the 16 ANSI named colors; the cube starts at 16.
+/// Indices 0-15 are the 16 ANSI named colors; the cube starts at 16.
 pub const CUBE_BASE: u8 = 16;
 
-/// Number of discrete intensity steps (0–5) per channel in the cube.
+/// Number of discrete intensity steps (0-5) per channel in the cube.
 pub const CUBE_STEPS: u8 = 6;
 
 /// Stride of the red channel within the cube (CUBE_STEPS² = 36).
 pub const CUBE_RED_STRIDE: u8 = CUBE_STEPS * CUBE_STEPS;
 
-/// Maps an 8-bit channel value into a 0–5 cube index.
+/// Maps an 8-bit channel value into a 0-5 cube index.
 /// 256 / 6 ≈ 42.67; 43 gives the correct bucket boundaries.
 pub const CUBE_CHANNEL_DIVISOR: u8 = 43;
 

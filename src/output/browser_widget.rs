@@ -33,8 +33,8 @@ impl<'a> BrowserWidget<'a> {
 const SUBCELL_COLS: usize = 2;
 
 /// Vertical sub-pixels per terminal cell.
-/// Each cell maps to a 4-tall virtual grid, split into a top pair (rows 0–1)
-/// and a bottom pair (rows 2–3) for quadrant block character selection.
+/// Each cell maps to a 4-tall virtual grid, split into a top pair (rows 0-1)
+/// and a bottom pair (rows 2-3) for quadrant block character selection.
 const SUBCELL_ROWS: usize = 4;
 
 /// Row offset of the first bottom-half sub-pixel within a cell.

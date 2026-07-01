@@ -341,7 +341,7 @@ fn character_code(ch: char) -> Option<Code> {
     })
 }
 
-/// Map a function key number (1–24) to its Servo `NamedKey` and `Code`.
+/// Map a function key number (1-24) to its Servo `NamedKey` and `Code`.
 /// Numbers outside that range yield `Unidentified` for both fields.
 fn function_key(n: u8) -> (NamedKey, Code) {
     match n {
