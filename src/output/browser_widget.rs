@@ -1,4 +1,4 @@
-use glam::UVec2;
+use glam::{UVec2, Vec2};
 use ratatui::{buffer::Buffer, layout::Rect, style::Style, widgets::Widget};
 
 use super::color::{LUMA_B, LUMA_G, LUMA_R, LUMA_SHIFT, to_terminal_color};
@@ -9,6 +9,10 @@ use super::color::{LUMA_B, LUMA_G, LUMA_R, LUMA_SHIFT, to_terminal_color};
 pub struct BrowserFrame {
     pub pixels: Vec<u8>,
     pub size: UVec2,
+    /// Root scroll offset, in CSS pixels, that the renderer used to composite
+    /// these pixels. Captured at paint time so the native text overlay can be
+    /// positioned against the exact frame on screen rather than an estimate.
+    pub scroll_offset: Vec2,
 }
 
 /// Ratatui widget that maps a `BrowserFrame` into terminal cells using
