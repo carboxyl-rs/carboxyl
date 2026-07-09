@@ -115,16 +115,14 @@ impl Widget for TextOverlay<'_> {
                 DisplayListItemContent::Image => {
                     occluders.push(rect);
                 }
-                DisplayListItemContent::SolidColor { .. } | DisplayListItemContent::Iframe { .. } => {
+                DisplayListItemContent::SolidColor { .. }
+                | DisplayListItemContent::Iframe { .. } => {
                     // Semi-transparent fills are not reliable occluders; iframe
                     // markers are containers (child items follow in paint order).
                 }
                 DisplayListItemContent::Text { text, color } => {
                     // Drop text fully covered by a higher-z opaque element.
-                    if occluders
-                        .iter()
-                        .any(|&occ| fully_contains(occ, rect))
-                    {
+                    if occluders.iter().any(|&occ| fully_contains(occ, rect)) {
                         continue;
                     }
 
@@ -193,10 +191,7 @@ impl Widget for TextOverlay<'_> {
 // ---------------------------------------------------------------------------
 
 /// True when `outer` fully covers `inner` in viewport coordinates.
-fn fully_contains(
-    outer: (f32, f32, f32, f32),
-    inner: (f32, f32, f32, f32),
-) -> bool {
+fn fully_contains(outer: (f32, f32, f32, f32), inner: (f32, f32, f32, f32)) -> bool {
     outer.0 <= inner.0 && outer.1 <= inner.1 && outer.2 >= inner.2 && outer.3 >= inner.3
 }
 
