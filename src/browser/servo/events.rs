@@ -1,11 +1,9 @@
 use dpi::PhysicalSize;
-use servo::InputEvent;
+use servo::{DisplayList, InputEvent};
 use url::Url;
 
 use crate::input;
 use crate::output::BrowserFrame;
-#[cfg(feature = "native-text")]
-use crate::output::TextNode;
 
 // ---------------------------------------------------------------------------
 // Events flowing into the main loop
@@ -20,13 +18,8 @@ pub enum RuntimeEvent {
     Delegate(DelegateEvent),
     /// Terminal was resized to (cols, rows).
     Resize(u16, u16),
-    /// Text nodes extracted from the page via JS.
-    #[cfg(feature = "native-text")]
-    TextNodes(Vec<TextNode>),
-    /// Fired by the delegate after load-complete; causes an immediate extract
-    /// (bypassing the debounce) so native text appears as soon as the page settles.
-    #[cfg(feature = "native-text")]
-    TextExtractRequested,
+    /// A layout display-list snapshot delivered by Servo's layout engine.
+    DisplayList(DisplayList),
     Exit,
 }
 
@@ -52,13 +45,6 @@ pub enum ServoCommand {
     Reload,
     Resize(PhysicalSize<u32>),
     Input(InputEvent),
-    /// Composite and send back a frame if anything changed.
     Paint,
-    /// Run the text extraction script and send results back.
-    #[cfg(feature = "native-text")]
-    ExtractText,
-    /// Inject the text-suppression stylesheet into the current page.
-    #[cfg(feature = "native-text")]
-    SuppressText,
     Shutdown,
 }

@@ -2,9 +2,7 @@ use anyhow::Result;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::{DefaultTerminal, Frame};
 
-#[cfg(feature = "native-text")]
-use crate::output::TextOverlay;
-use crate::output::{BrowserWidget, NavWidget};
+use crate::output::{BrowserWidget, NavWidget, TextOverlay};
 
 use super::app_state::AppState;
 use super::timing::RenderConfig;
@@ -29,16 +27,16 @@ pub fn draw_frame(
         if let Some(frame) = app.frame.as_ref() {
             f.render_widget(BrowserWidget::new(frame, cfg.true_color), browser_area);
 
-            #[cfg(feature = "native-text")]
-            if cfg.native_text && !app.text_nodes.is_empty() {
+            if let Some(dl) = app.display_list.as_ref() {
                 let pixels = Some((frame.pixels.as_slice(), frame.size.x, frame.size.y));
                 f.render_widget(
                     TextOverlay::new(
-                        &app.text_nodes,
+                        &dl.items,
                         app.window.cell_pixels,
                         pixels,
                         cfg.true_color,
-                        &mut app.occupied_cells,
+                        frame.scroll_offset.x,
+                        frame.scroll_offset.y,
                     ),
                     browser_area,
                 );
