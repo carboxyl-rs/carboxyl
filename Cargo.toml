@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 rustls = "0.23"
-servo = { path = "servo/components/servo" }
+servo = {git = "https://github.com/philocalyst/servo", branch = "carboxyl"}
 url = "2.5"
 clap = { version = "4", features = ["derive"] }
 ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache"] }
