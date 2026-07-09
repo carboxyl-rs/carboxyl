@@ -28,9 +28,6 @@ pub const LUMA_SHIFT: u32 = 8;
 
 /// Maximum luma value on the pre-shift scale: white = 255 × (77 + 150 + 29)
 /// = 255 × 256 = 65 280.
-// Only consumed by output/native_text.rs, which is compiled only with the
-// native-text feature; unconditional so the constant is always available.
-#[allow(dead_code)]
 pub const MAX_LUMA: u32 = 255 * (LUMA_R + LUMA_G + LUMA_B);
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,3 @@
-// src/browser/servo/session.rs
-
 mod app_state;
 mod dispatch;
 mod render;
@@ -16,15 +14,12 @@ use super::BrowserConfig;
 use super::events::{RuntimeEvent, ServoCommand};
 use super::geometry::physical_size;
 
-// Re-exported so sub-modules (dispatch, app_state) can import via `super::`
-// instead of climbing two levels with `super::super::`.
 pub(super) use super::{events, geometry, url};
 
 pub use app_state::AppState;
 pub use timing::{RenderConfig, TimingState};
 
 /// How long to block waiting for events before doing an idle tick.
-/// Sets the floor for repaint latency when the event stream goes quiet.
 const IDLE_TIMEOUT: Duration = Duration::from_millis(50);
 
 // ---------------------------------------------------------------------------
@@ -60,12 +55,7 @@ struct Session {
 
 impl Session {
     fn new(channels: Channels, browser_cfg: &BrowserConfig) -> Self {
-        let cfg = RenderConfig::new(
-            browser_cfg.true_color,
-            #[cfg(feature = "native-text")]
-            browser_cfg.native_text,
-            browser_cfg.fps,
-        );
+        let cfg = RenderConfig::new(browser_cfg.true_color, browser_cfg.fps);
         Self {
             app: AppState::new(browser_cfg.window.clone()),
             timing: TimingState::new(cfg.frame_budget),
@@ -100,16 +90,19 @@ impl Session {
                 let batch_scroll =
                     dispatch::drain_pending_inputs(&self.event_rx, &self.servo_tx, &mut self.app);
 
-                #[cfg(feature = "native-text")]
-                if (is_scroll || batch_scroll) && self.cfg.native_text {
-                    self.schedule_extract();
+                if is_scroll || batch_scroll {
+                    // Request a fresh frame so the overlay is composited against
+                    // up-to-date pixels and the renderer's new scroll offset -
+                    // the Frame arrival will trigger the terminal repaint.
+                    if self.timing.paint_cmd_due(self.cfg.frame_budget) {
+                        if self.servo_tx.try_send(ServoCommand::Paint).is_err() {
+                            log::trace!("paint command dropped - servo channel at capacity");
+                        }
+                        self.timing.mark_paint_cmd();
+                    }
+                } else {
+                    self.app.mark_dirty();
                 }
-
-                // Suppress unused-variable warnings when feature is off.
-                #[cfg(not(feature = "native-text"))]
-                let _ = (is_scroll, batch_scroll);
-
-                self.app.mark_dirty();
             }
 
             RuntimeEvent::Wake => {
@@ -119,8 +112,6 @@ impl Session {
                     }
                     self.timing.mark_paint_cmd();
                 }
-                #[cfg(feature = "native-text")]
-                self.maybe_schedule_extract();
             }
 
             RuntimeEvent::Resize(cols, rows) => {
@@ -131,11 +122,6 @@ impl Session {
                         .is_err()
                 {
                     log::trace!("resize command dropped - servo channel at capacity");
-                }
-                #[cfg(feature = "native-text")]
-                {
-                    self.timing.invalidate_extract();
-                    self.maybe_schedule_extract();
                 }
             }
 
@@ -148,20 +134,10 @@ impl Session {
                     let _ = write!(io::stdout(), "\x1b]0;{title}\x07");
                     let _ = io::stdout().flush();
                 }
-                #[cfg(feature = "native-text")]
-                self.timing.invalidate_extract();
             }
 
-            #[cfg(feature = "native-text")]
-            RuntimeEvent::TextNodes(nodes) => {
-                self.app.apply_text_nodes(nodes);
-            }
-
-            #[cfg(feature = "native-text")]
-            RuntimeEvent::TextExtractRequested => {
-                if self.cfg.native_text {
-                    self.schedule_extract();
-                }
+            RuntimeEvent::DisplayList(dl) => {
+                self.app.apply_display_list(dl);
             }
 
             RuntimeEvent::Exit => self.app.stop(),
@@ -175,20 +151,5 @@ impl Session {
             render::draw_frame(&mut self.terminal, &mut self.app, &self.cfg)?;
         }
         Ok(())
-    }
-
-    #[cfg(feature = "native-text")]
-    fn schedule_extract(&mut self) {
-        if self.servo_tx.try_send(ServoCommand::ExtractText).is_err() {
-            log::trace!("extract command dropped - servo channel at capacity");
-        }
-        self.timing.mark_extracted();
-    }
-
-    #[cfg(feature = "native-text")]
-    fn maybe_schedule_extract(&mut self) {
-        if self.cfg.native_text && self.timing.extract_due() {
-            self.schedule_extract();
-        }
     }
 }

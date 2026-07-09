@@ -1,8 +1,8 @@
-#[cfg(feature = "native-text")]
-use crate::output::TextNode;
+use servo::DisplayList;
+
 use crate::output::{BrowserFrame, NavState, NavigationCapability, Window};
 
-use super::{events::DelegateEvent, geometry::BrowserPoint};
+use super::super::{events::DelegateEvent, geometry::BrowserPoint};
 
 // ---------------------------------------------------------------------------
 // AppState
@@ -16,10 +16,10 @@ pub struct AppState {
     pub nav: NavState,
     pub pointer: BrowserPoint,
     pub frame: Option<BrowserFrame>,
-    #[cfg(feature = "native-text")]
-    pub text_nodes: Vec<TextNode>,
-    #[cfg(feature = "native-text")]
-    pub occupied_cells: Vec<bool>,
+    /// The most recently delivered display-list snapshot from Servo's layout
+    /// engine. Text runs are in document/viewport space; the per-frame
+    /// `BrowserFrame::scroll_offset` supplies the live scroll position.
+    pub display_list: Option<DisplayList>,
 }
 
 impl AppState {
@@ -31,16 +31,9 @@ impl AppState {
             nav: NavState::default(),
             pointer: BrowserPoint::default(),
             frame: None,
-            #[cfg(feature = "native-text")]
-            text_nodes: Vec::new(),
-            #[cfg(feature = "native-text")]
-            occupied_cells: Vec::new(),
+            display_list: None,
         }
     }
-
-    // ------------------------------------------------------------------
-    // State transitions
-    // ------------------------------------------------------------------
 
     pub fn mark_dirty(&mut self) {
         self.pending_paint = true;
@@ -73,8 +66,6 @@ impl AppState {
     pub fn apply_delegate(&mut self, ev: DelegateEvent) -> Option<String> {
         match ev {
             DelegateEvent::UrlChanged(url) => {
-                // Preserve the current capability flags unchanged; HistoryChanged
-                // fires immediately after with the authoritative back/forward state.
                 let nav = self.nav.nav;
                 self.nav.push(url, nav);
             }
@@ -91,6 +82,7 @@ impl AppState {
                         forward: can_go_forward,
                     },
                 );
+                self.display_list = None;
             }
 
             DelegateEvent::TitleChanged(title) => {
@@ -107,9 +99,15 @@ impl AppState {
         None
     }
 
-    #[cfg(feature = "native-text")]
-    pub fn apply_text_nodes(&mut self, nodes: Vec<TextNode>) {
-        self.text_nodes = nodes;
+    pub fn apply_display_list(&mut self, dl: DisplayList) {
+        if self
+            .display_list
+            .as_ref()
+            .is_some_and(|current| dl.epoch < current.epoch)
+        {
+            return;
+        }
+        self.display_list = Some(dl);
         self.mark_dirty();
     }
 }

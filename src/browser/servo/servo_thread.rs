@@ -15,8 +15,6 @@ use crate::output::BrowserFrame;
 
 use super::delegates::{TerminalServoDelegate, TerminalWebViewDelegate};
 use super::events::{RuntimeEvent, ServoCommand};
-#[cfg(feature = "native-text")]
-use super::native_text;
 use super::waker::ServoWaker;
 
 // ---------------------------------------------------------------------------
@@ -24,7 +22,7 @@ use super::waker::ServoWaker;
 // ---------------------------------------------------------------------------
 
 /// Brief sleep after each `spin_event_loop` call. Prevents the servo thread
-/// from monopolising a core between paint/extract cycles while still allowing
+/// from monopolising a core between paint cycles while still allowing
 /// Servo's own timers and animation frames to fire promptly.
 const SERVO_SPIN_SLEEP: Duration = Duration::from_millis(1);
 
@@ -32,20 +30,10 @@ const SERVO_SPIN_SLEEP: Duration = Duration::from_millis(1);
 // PendingOps - batch-accumulates commands drained from the servo channel
 // ---------------------------------------------------------------------------
 
-/// Flags and deferred data accumulated while draining the command queue in
-/// one pass before calling `spin_event_loop`.
-///
-/// Immediate actions (Load, Input, etc.) are dispatched directly in `apply`;
-/// deferred actions (paint, extract, suppress) are flagged and executed
-/// afterwards in a fixed, deterministic order.
 #[derive(Default)]
 struct PendingOps {
     shutdown: bool,
     paint: bool,
-    #[cfg(feature = "native-text")]
-    extract: bool,
-    #[cfg(feature = "native-text")]
-    suppress: bool,
     resize: Option<PhysicalSize<u32>>,
 }
 
@@ -70,10 +58,6 @@ impl PendingOps {
                 webview.notify_input_event(ev);
             }
             ServoCommand::Paint => self.paint = true,
-            #[cfg(feature = "native-text")]
-            ServoCommand::ExtractText => self.extract = true,
-            #[cfg(feature = "native-text")]
-            ServoCommand::SuppressText => self.suppress = true,
         }
     }
 }
@@ -88,7 +72,6 @@ pub fn servo_thread(
     servo_rx: mpsc::Receiver<ServoCommand>,
     url: Url,
     browser_size: PhysicalSize<u32>,
-    #[cfg(feature = "native-text")] native_text: bool,
 ) {
     let servo = ServoBuilder::default()
         .preferences(browser_preferences(Preferences::default()))
@@ -109,10 +92,6 @@ pub fn servo_thread(
 
     let delegate: Rc<dyn WebViewDelegate> = Rc::new(TerminalWebViewDelegate {
         event_tx: event_tx.clone(),
-        #[cfg(feature = "native-text")]
-        servo_tx: servo_tx.clone(),
-        #[cfg(feature = "native-text")]
-        native_text,
     });
 
     let webview = WebViewBuilder::new(&servo, rendering_context.clone())
@@ -124,8 +103,6 @@ pub fn servo_thread(
     webview.focus();
 
     while let Ok(cmd) = servo_rx.recv() {
-        // Drain the full queue before spinning, so a burst of commands is
-        // processed in one Servo cycle rather than many round-trips.
         let mut ops = PendingOps::default();
         ops.apply(cmd, &webview);
         while let Ok(cmd) = servo_rx.try_recv() {
@@ -142,23 +119,6 @@ pub fn servo_thread(
 
         servo.spin_event_loop();
 
-        // Suppress first so Servo repaints with transparent text before we
-        // extract node positions - guarantees the two are always paired.
-        // Skip paint this cycle when suppress fires: the JS won't execute
-        // until the next spin, so painting now would capture un-suppressed
-        // pixels. The following notify_new_frame_ready → Wake → Paint cycle
-        // will capture the correctly suppressed frame.
-        #[cfg(feature = "native-text")]
-        if ops.suppress {
-            native_text::suppress(&webview);
-            ops.paint = false;
-        }
-
-        #[cfg(feature = "native-text")]
-        if ops.extract {
-            native_text::extract(&webview, event_tx.clone());
-        }
-
         if ops.paint
             && let Some(frame) = paint(&webview, rendering_context.as_ref())
         {
@@ -174,7 +134,7 @@ pub fn servo_thread(
 // ---------------------------------------------------------------------------
 
 fn paint(webview: &WebView, ctx: &dyn RenderingContext) -> Option<BrowserFrame> {
-    use glam::UVec2;
+    use glam::{UVec2, Vec2};
 
     ctx.make_current().ok()?;
     webview.paint();
@@ -188,9 +148,17 @@ fn paint(webview: &WebView, ctx: &dyn RenderingContext) -> Option<BrowserFrame> 
     let image = ctx.read_to_image(rect)?;
     ctx.present();
 
+    // Read the offset the renderer just composited with, so the overlay aligns
+    // with these exact pixels regardless of async-scroll timing.
+    let scroll_offset = webview
+        .root_scroll_offset()
+        .map(|(x, y)| Vec2::new(x, y))
+        .unwrap_or(Vec2::ZERO);
+
     Some(BrowserFrame {
         size: UVec2::new(image.width(), image.height()),
         pixels: image.into_raw(),
+        scroll_offset,
     })
 }
 
@@ -198,5 +166,10 @@ fn browser_preferences(mut p: Preferences) -> Preferences {
     p.network_http_proxy_uri.clear();
     p.network_https_proxy_uri.clear();
     p.network_http_no_proxy.clear();
+    // Capture the display list so the overlay knows where the text is and
+    // its real color, and stop Servo from rasterizing the glyphs itself so
+    // the overlay is the only text on screen - no doubling, no color loss.
+    p.layout_display_list_capture_enabled = true;
+    p.layout_text_painting_enabled = false;
     p
 }

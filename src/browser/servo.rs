@@ -5,8 +5,6 @@ mod events;
 mod geometry;
 mod input_thread;
 mod keyboard;
-#[cfg(feature = "native-text")]
-mod native_text;
 mod servo_thread;
 pub(crate) mod session;
 mod signal_thread;
@@ -52,8 +50,6 @@ const TRUE_COLOR_COUNT: u32 = 1 << 24;
 pub struct BrowserConfig {
     pub window: Window,
     pub true_color: bool,
-    #[cfg(feature = "native-text")]
-    pub native_text: bool,
     pub fps: u16,
     pub initial_url: ::url::Url,
     pub log_path: Option<PathBuf>,
@@ -67,8 +63,6 @@ impl BrowserConfig {
             log_path,
             window: Window::read(cli),
             true_color: u32::from(available_color_count()) >= TRUE_COLOR_COUNT,
-            #[cfg(feature = "native-text")]
-            native_text: !cli.no_native_text,
             fps: cli.fps,
             initial_url: url::normalize_url(cli.url.clone())?,
         })
@@ -115,8 +109,6 @@ impl BrowserRuntime {
             let servo_tx_waker = servo_tx.clone();
             let initial_url = cfg.initial_url.clone();
             let browser_size = physical_size(cfg.window.browser);
-            #[cfg(feature = "native-text")]
-            let native_text = cfg.native_text;
 
             thread::Builder::new()
                 .name("servo".to_owned())
@@ -128,8 +120,6 @@ impl BrowserRuntime {
                         servo_rx,
                         initial_url,
                         browser_size,
-                        #[cfg(feature = "native-text")]
-                        native_text,
                     );
                 })
                 .expect("failed to spawn servo thread")

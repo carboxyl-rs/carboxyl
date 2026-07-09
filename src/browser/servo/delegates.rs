@@ -2,12 +2,10 @@ use std::sync::mpsc;
 
 use log::{error, warn};
 use servo::{
-    AuthenticationRequest, LoadStatus, ServoDelegate, ServoError, WebView, WebViewDelegate,
+    AuthenticationRequest, DisplayList, ServoDelegate, ServoError, WebView, WebViewDelegate,
 };
 use url::Url;
 
-#[cfg(feature = "native-text")]
-use super::events::ServoCommand;
 use super::events::{DelegateEvent, RuntimeEvent};
 
 // ---------------------------------------------------------------------------
@@ -16,10 +14,6 @@ use super::events::{DelegateEvent, RuntimeEvent};
 
 pub struct TerminalWebViewDelegate {
     pub event_tx: mpsc::SyncSender<RuntimeEvent>,
-    #[cfg(feature = "native-text")]
-    pub servo_tx: mpsc::SyncSender<ServoCommand>,
-    #[cfg(feature = "native-text")]
-    pub native_text: bool,
 }
 
 impl WebViewDelegate for TerminalWebViewDelegate {
@@ -77,19 +71,10 @@ impl WebViewDelegate for TerminalWebViewDelegate {
         );
     }
 
-    fn notify_load_status_changed(&self, _: WebView, _status: LoadStatus) {
-        #[cfg(feature = "native-text")]
-        if self.native_text {
-            match _status {
-                LoadStatus::HeadParsed => {
-                    let _ = self.servo_tx.try_send(ServoCommand::SuppressText);
-                }
-                LoadStatus::Complete => {
-                    let _ = self.event_tx.try_send(RuntimeEvent::TextExtractRequested);
-                }
-                _ => {}
-            }
-        }
+    fn notify_display_list(&self, _: WebView, display_list: DisplayList) {
+        let _ = self
+            .event_tx
+            .try_send(RuntimeEvent::DisplayList(display_list));
     }
 }
 

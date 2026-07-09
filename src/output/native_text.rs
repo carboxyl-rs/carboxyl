@@ -1,8 +1,9 @@
-//! Terminal-native text overlay renderer.
+//! Terminal-native text overlay.
 //!
-//! `TextOverlay` replaces the pixel cells where text exists with native
-//! terminal glyphs, sampling the pixel buffer for the background color so
-//! the result is visually seamless with the surrounding pixel render.
+//! After each layout pass Servo delivers a [`servo::DisplayList`] containing
+//! every laid-out text run with its bounding rect and foreground color.
+//! `TextOverlay` maps those runs onto terminal cells, sampling the pixel
+//! buffer for a seamless background color.
 
 use glam::Vec2;
 use ratatui::{
@@ -11,7 +12,9 @@ use ratatui::{
     style::{Color, Style},
     widgets::Widget,
 };
-use unicode_width::UnicodeWidthChar;
+use servo::{DisplayListItem, DisplayListItemContent, DisplayListItemSpace};
+use std::collections::HashSet;
+use unicode_width::UnicodeWidthStr;
 
 use super::color::{LUMA_B, LUMA_G, LUMA_R, MAX_LUMA, to_terminal_color};
 
@@ -19,61 +22,69 @@ use super::color::{LUMA_B, LUMA_G, LUMA_R, MAX_LUMA, to_terminal_color};
 // Contrast constants
 // ---------------------------------------------------------------------------
 
+/// Minimum luma difference (on the 0..=MAX_LUMA pre-shift scale) required
+/// to consider foreground/background contrast acceptable.
 const MIN_CONTRAST: u32 = 6_000;
+
+/// Luma threshold for the black-vs-white fallback. Half of MAX_LUMA.
 const MID_LUMA: u32 = MAX_LUMA / 2;
 
-// ---------------------------------------------------------------------------
-// Data model
-// ---------------------------------------------------------------------------
-
-/// A single visible text item extracted from the page DOM.
-#[derive(Clone, Debug)]
-pub struct TextNode {
-    pub text: String,
-    /// Position in CSS pixels, viewport-relative (from getBoundingClientRect,
-    /// adjusted by element padding+border to the content box origin).
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    /// Foreground color from `getComputedStyle().color`.
-    pub color: Color,
-}
+/// Alpha threshold above which a SolidColor item is considered an opaque
+/// occluder - anything on top with this alpha fully hides what's beneath.
+const OCCLUDER_ALPHA: f32 = 0.9;
 
 // ---------------------------------------------------------------------------
 // Widget
 // ---------------------------------------------------------------------------
 
-/// Renders text nodes as native terminal glyphs, replacing the pixel cells
-/// at each text position with a fully opaque cell whose background is sampled
-/// from the pixel buffer. This makes native text visually seamless with the
-/// surrounding pixel render while being crisp and resolution-independent.
+/// Renders display-list text runs as native terminal glyphs.
+///
+/// Text cells replace the underlying pixel cells; the background color is
+/// sampled from the pixel buffer so the result is visually seamless with the
+/// surrounding pixel render.
 pub struct TextOverlay<'a> {
-    nodes: &'a [TextNode],
+    items: &'a [DisplayListItem],
     cell_pixels: Vec2,
     /// Raw RGBA8888 pixel data from the last frame, with frame dimensions.
     pixels: Option<(&'a [u8], u32, u32)>,
     true_color: bool,
-    /// Reusable scratch buffer for the occupied-cell bitmap; cleared and
-    /// resized on each render to avoid a per-frame heap allocation.
-    occupied: &'a mut Vec<bool>,
+    /// Live root viewport scroll offset in CSS pixels (from the painted frame).
+    scroll_x: f32,
+    scroll_y: f32,
 }
 
 impl<'a> TextOverlay<'a> {
     pub fn new(
-        nodes: &'a [TextNode],
+        items: &'a [DisplayListItem],
         cell_pixels: Vec2,
         pixels: Option<(&'a [u8], u32, u32)>,
         true_color: bool,
-        occupied: &'a mut Vec<bool>,
+        scroll_x: f32,
+        scroll_y: f32,
     ) -> Self {
         Self {
-            nodes,
+            items,
             cell_pixels,
             pixels,
             true_color,
-            occupied,
+            scroll_x,
+            scroll_y,
         }
+    }
+
+    /// Convert an item rect into viewport-relative CSS pixels using the live
+    /// scroll offset for [`DisplayListItemSpace::Document`] items.
+    fn viewport_rect(&self, item: &DisplayListItem) -> (f32, f32, f32, f32) {
+        let (sx, sy) = match item.space {
+            DisplayListItemSpace::Document => (self.scroll_x, self.scroll_y),
+            DisplayListItemSpace::Viewport => (0.0, 0.0),
+        };
+        (
+            item.rect.min.x - sx,
+            item.rect.min.y - sy,
+            item.rect.max.x - sx,
+            item.rect.max.y - sy,
+        )
     }
 }
 
@@ -83,88 +94,128 @@ impl Widget for TextOverlay<'_> {
             return;
         }
 
-        let grid_w = area.width as usize;
-        let grid_h = area.height as usize;
+        let viewport_w = area.width as f32 * self.cell_pixels.x;
+        let viewport_h = area.height as f32 * self.cell_pixels.y;
 
-        // Reuse the caller-supplied buffer to avoid a per-frame allocation.
-        // Earlier DOM nodes take priority (bitmap marks cells as occupied).
-        self.occupied.clear();
-        self.occupied.resize(grid_w * grid_h, false);
+        let mut occupied: HashSet<(u16, u16)> = HashSet::new();
 
-        for node in self.nodes {
-            let col = (node.x / self.cell_pixels.x).floor() as u16;
-            let row = (node.y / self.cell_pixels.y).floor() as u16;
+        // Build occluder list while iterating front-to-back (reverse of paint
+        // order). Items are in paint order (back→front); iterating in reverse
+        // means we encounter the frontmost items first and accumulate their
+        // rects so later (lower-z) text can be skipped when fully covered.
+        let mut occluders: Vec<(f32, f32, f32, f32)> = Vec::new();
 
-            if col >= area.width || row >= area.height {
-                continue;
-            }
+        for item in self.items.iter().rev() {
+            let rect = self.viewport_rect(item);
 
-            let x = area.x + col;
-            let y = area.y + row;
-            let max_cols = (area.width - col) as usize;
-
-            let bg = self
-                .pixels
-                .and_then(|(px, pw, ph)| sample_cell_bg(px, pw, ph, col, row, self.cell_pixels))
-                .map(|c| to_terminal_color(c, self.true_color))
-                .unwrap_or(Color::Reset);
-
-            let fg = ensure_contrast(node.color, bg);
-
-            let text = truncate_to_available(
-                &node.text,
-                col as usize,
-                row as usize,
-                max_cols,
-                self.occupied,
-                grid_w,
-            );
-            if text.is_empty() {
-                continue;
-            }
-
-            let mut cur = col as usize;
-            for ch in text.chars() {
-                let w = ch.width().unwrap_or(0);
-                for i in 0..w {
-                    let idx = row as usize * grid_w + cur + i;
-                    if idx < self.occupied.len() {
-                        self.occupied[idx] = true;
-                    }
+            match &item.content {
+                DisplayListItemContent::SolidColor { color } if color.a >= OCCLUDER_ALPHA => {
+                    occluders.push(rect);
                 }
-                cur += w;
-            }
+                DisplayListItemContent::Image => {
+                    occluders.push(rect);
+                }
+                DisplayListItemContent::SolidColor { .. }
+                | DisplayListItemContent::Iframe { .. } => {
+                    // Semi-transparent fills are not reliable occluders; iframe
+                    // markers are containers (child items follow in paint order).
+                }
+                DisplayListItemContent::Text { text, color } => {
+                    // Drop text fully covered by a higher-z opaque element.
+                    if occluders.iter().any(|&occ| fully_contains(occ, rect)) {
+                        continue;
+                    }
 
-            buf.set_string(x, y, &text, Style::new().fg(fg).bg(bg));
+                    let (vx0, vy0, vx1, vy1) = rect;
+
+                    // Skip runs outside the visible viewport.
+                    if vx1 <= 0.0 || vy1 <= 0.0 || vx0 >= viewport_w || vy0 >= viewport_h {
+                        continue;
+                    }
+
+                    let col = (vx0 / self.cell_pixels.x).floor();
+                    let row = (vy0 / self.cell_pixels.y).floor();
+                    if col < 0.0 || row < 0.0 {
+                        continue;
+                    }
+
+                    let col = col as u16;
+                    let row = row as u16;
+                    if col >= area.width || row >= area.height {
+                        continue;
+                    }
+
+                    let x = area.x + col;
+                    let y = area.y + row;
+                    let max_cols = (area.width - col) as usize;
+
+                    let fg = Color::Rgb(
+                        (color.r * 255.0) as u8,
+                        (color.g * 255.0) as u8,
+                        (color.b * 255.0) as u8,
+                    );
+
+                    let bg = self
+                        .pixels
+                        .and_then(|(px, pw, ph)| {
+                            sample_cell_bg(px, pw, ph, col, row, self.cell_pixels)
+                        })
+                        .map(|c| to_terminal_color(c, self.true_color))
+                        .unwrap_or(Color::Reset);
+
+                    let fg = ensure_contrast(fg, bg);
+
+                    let text = truncate_to_available(text, x, y, max_cols, &occupied);
+                    if text.is_empty() {
+                        continue;
+                    }
+
+                    let mut cursor = x;
+                    for ch in text.chars() {
+                        let w = ch.to_string().width() as u16;
+                        for i in 0..w {
+                            occupied.insert((cursor + i, y));
+                        }
+                        cursor += w;
+                    }
+
+                    buf.set_string(x, y, text, Style::new().fg(fg).bg(bg));
+                }
+            }
         }
     }
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// True when `outer` fully covers `inner` in viewport coordinates.
+fn fully_contains(outer: (f32, f32, f32, f32), inner: (f32, f32, f32, f32)) -> bool {
+    outer.0 <= inner.0 && outer.1 <= inner.1 && outer.2 >= inner.2 && outer.3 >= inner.3
+}
+
 fn truncate_to_available(
     s: &str,
-    col: usize,
-    row: usize,
+    x: u16,
+    y: u16,
     max_cols: usize,
-    occupied: &[bool],
-    grid_w: usize,
+    occupied: &HashSet<(u16, u16)>,
 ) -> String {
-    let mut width = 0usize;
+    let mut width = 0;
     let mut result = String::new();
-    let mut cursor = col;
+    let mut cursor = x;
     for ch in s.chars() {
-        let w = ch.width().unwrap_or(0);
+        let w = ch.to_string().width();
         if width + w > max_cols {
             break;
         }
-        if (0..w).any(|i| {
-            let idx = row * grid_w + cursor + i;
-            idx < occupied.len() && occupied[idx]
-        }) {
+        if occupied.contains(&(cursor, y)) {
             break;
         }
         result.push(ch);
         width += w;
-        cursor += w;
+        cursor += w as u16;
     }
     result
 }

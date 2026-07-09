@@ -55,10 +55,17 @@ pub fn handle_input(
             let p = BrowserPoint::from_cell(&app.window, col, row);
             app.pointer = p;
 
+            let dx = delta_x as f32 * app.window.cell_pixels.x;
+            let dy = delta_y as f32 * app.window.cell_pixels.y;
+
+            // The overlay's scroll position now comes from the painted frame
+            // (`BrowserFrame::scroll_offset`), read back from the renderer after
+            // each composite, so there is no offset to track optimistically here.
+
             let ev = InputEvent::Wheel(WheelEvent::new(
                 WheelDelta {
-                    x: delta_x as f64 * app.window.cell_pixels.x as f64,
-                    y: delta_y as f64 * app.window.cell_pixels.y as f64,
+                    x: dx as f64,
+                    y: dy as f64,
                     z: 0.0,
                     mode: WheelMode::DeltaPixel,
                 },
