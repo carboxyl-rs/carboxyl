@@ -2,7 +2,7 @@ use servo::DisplayList;
 
 use crate::output::{BrowserFrame, NavState, NavigationCapability, Window};
 
-use super::super::{events::DelegateEvent, geometry::BrowserPoint};
+use crate::browser::servo::{events::DelegateEvent, geometry::BrowserPoint};
 
 // ---------------------------------------------------------------------------
 // AppState
