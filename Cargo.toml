@@ -2,6 +2,18 @@
 name = "carboxyl"
 version = "0.1.0"
 edition = "2024"
+description = "A terminal web browser built on Servo, a community fork of Carbonyl."
+authors = [
+  "Fathy Boundjadj <fathy.boundjadj@gmail.com>",
+  "Orhun Parmaksiz <orhunparmaksiz@gmail.com>",
+  "gold-silver-copper",
+  "philocalyst",
+  "takashialpha <takashialpha@protonmail.com>",
+]
+license = "BSD-3-Clause"
+repository = "https://github.com/carboxyl-rs/carboxyl"
+keywords = ["browser", "terminal", "servo", "tui", "cli"]
+categories = ["command-line-utilities", "web-programming"]
 
 [features]
 default = ["native-text"]
@@ -9,10 +21,13 @@ native-text = []
 
 [dependencies]
 rustls = "0.23"
-servo = "0.3"
+servo = "0.4"
 url = "2.5"
 clap = { version = "4", features = ["derive"] }
-ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache"] }
+ratatui = { version = "0.30", default-features = false, features = [
+  "crossterm",
+  "layout-cache",
+] }
 rustix = { version = "1", features = ["termios", "stdio", "process"] }
 dpi = "0.1"
 unicode-width = "0.2"
