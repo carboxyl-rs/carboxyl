@@ -27,7 +27,7 @@ It does not require a window server (i.e. works in a safe-mode console), and eve
 
 ## Status
 
-> Carboxyl now has a dedicated Chromium build server provided by [Lysator](https://www.lysator.liu.se/)!
+> Carboxyl now has a dedicated build server, which runs its CI and release builds, provided by [Lysator](https://www.lysator.liu.se/)!
 > See [this issue](https://github.com/carboxyl-rs/carboxyl/issues/9) for details.
 
 - The active runtime path is Servo-based.

@@ -23,10 +23,10 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Run Tests
+      - name: Test
         run: cargo test --verbose
 
-      - name: Format Check
+      - name: Format check
         run: cargo fmt --all -- --check
 
       - name: Clippy
