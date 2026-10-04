@@ -76,9 +76,9 @@ pub fn handle_input(
             ..
         } => {
             let servo_button = match button {
-                input::MouseButton::Left => MouseButton::Left,
-                input::MouseButton::Middle => MouseButton::Middle,
-                input::MouseButton::Right => MouseButton::Right,
+                input::MouseButton::Left => MouseButton::Primary,
+                input::MouseButton::Middle => MouseButton::Auxiliary,
+                input::MouseButton::Right => MouseButton::Secondary,
             };
 
             let p = BrowserPoint::from_cell(&app.window, col, row);
