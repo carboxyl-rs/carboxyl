@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -14,7 +18,7 @@ jobs:
     runs-on: self-hosted # giant-rat (runs arch linux), provided by lysator
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
