@@ -48,6 +48,30 @@ Or after building:
 $ ./target/release/carboxyl https://example.com
 ```
 
+Text is drawn with the terminal's own glyphs, flat backgrounds become real
+terminal colors, and only the cells with actual detail in them - images,
+gradients, canvases, form controls - are drawn as pixels. `--no-native-text`
+turns the glyph layer off and renders everything as pixels instead.
+
+`--scale` is Servo's page zoom, so it behaves like a desktop browser's: higher
+zooms in, lower shows more of the page.
+
+Detail cells use Kitty, Sixel or iTerm2 graphics when the terminal has them, and
+quadrant blocks when it does not. `--graphics auto|kitty|sixel|quadrant` picks a
+mode; anything unsupported falls back to quadrant blocks. Each region is encoded
+once and cached by content, so scrolling re-places uploads the terminal already
+holds rather than re-sending them.
+
+For all-pixel output with no terminal graphics at all:
+
+```console
+$ carboxyl --graphics quadrant --no-native-text https://example.com
+```
+
+Bundled resources, the JavaScript JIT, WebCrypto, WebGL, Brotli compression
+streams, and multiprocess support are included. Desktop clipboard, WebGPU,
+WebXR, and GStreamer media are not enabled in the default terminal build.
+
 ## Build
 
 ```console
