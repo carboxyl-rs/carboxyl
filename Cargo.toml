@@ -48,6 +48,10 @@ glam = "0.33"
 signal-hook = "0.4"
 anyhow = "1"
 
+[[example]]
+name = "render_smoke"
+test = true
+
 # Release optimizations.
 [profile.release]
 strip = true
