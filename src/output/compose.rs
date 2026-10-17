@@ -822,4 +822,33 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn wrapping_breaks_at_words_and_never_loses_characters() {
+        let mut lines = Vec::new();
+
+        wrap("alpha beta gamma", 11, &mut lines);
+        assert_eq!(lines, ["alpha beta", "gamma"]);
+
+        wrap("  spaced   out  ", 20, &mut lines);
+        assert_eq!(lines, ["spaced out"]);
+
+        // A word with nowhere to break is split rather than overflowing.
+        wrap("https://example.com/a/very/long/path", 10, &mut lines);
+        assert!(lines.iter().all(|line| line.width() <= 10));
+        assert_eq!(
+            lines.concat(),
+            "https://example.com/a/very/long/path",
+            "splitting a long word keeps every character"
+        );
+
+        // Text without spaces still wraps, on grapheme boundaries.
+        wrap("中文中文中文", 4, &mut lines);
+        assert_eq!(lines, ["中文", "中文", "中文"]);
+
+        wrap("", 10, &mut lines);
+        assert!(lines.is_empty());
+        wrap("x", 0, &mut lines);
+        assert_eq!(lines, ["x"]);
+    }
 }
