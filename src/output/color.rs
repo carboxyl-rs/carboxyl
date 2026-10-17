@@ -44,3 +44,27 @@ pub fn to_terminal_color((r, g, b): Rgb, true_color: bool) -> Color {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn luma_spans_the_full_range() {
+        assert_eq!(luma((0, 0, 0)), 0);
+        assert_eq!(luma((255, 255, 255)), 255);
+        assert!(luma((0, 255, 0)) > luma((255, 0, 0)));
+    }
+
+    #[test]
+    fn palette_fallback_stays_inside_the_color_cube() {
+        assert_eq!(to_terminal_color((1, 2, 3), true), Color::Rgb(1, 2, 3));
+        for channel in 0..=255u8 {
+            let rgb = (channel, channel, channel);
+            let Color::Indexed(index) = to_terminal_color(rgb, false) else {
+                panic!("expected an indexed color");
+            };
+            assert!((CUBE_BASE..CUBE_BASE + 216).contains(&index));
+        }
+    }
+}
