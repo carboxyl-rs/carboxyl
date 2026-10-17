@@ -16,7 +16,7 @@ R — C
 
 Carboxyl is a community fork of [Carbonyl](https://github.com/fathyb/carbonyl), now rebuilt around [Servo](https://github.com/servo/servo) instead of a patched Chromium runtime.
 
-It's snappy, starts almost instantly, runs at 60 FPS by default (can be toggled), and idles at 1% CPU usage.
+It renders web pages in your terminal, with a configurable frame-rate limit of 60 FPS by default.
 It does not require a window server (i.e. works in a safe-mode console), and even runs through SSH.
 
 > Join the Carboxyl community on [Discord](https://discord.gg/jzun3aN2ak).
