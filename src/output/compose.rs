@@ -799,4 +799,12 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn single_detailed_cells_keep_their_blocks_instead_of_an_upload() {
+        let mut page = Page::new(8, 2);
+        page.detail(PxRect::new(0.0, 0.0, 8.0, 16.0));
+        let (_, tiles) = page.render(true);
+        assert!(tiles.is_empty(), "one cell is not worth a tile");
+    }
 }
