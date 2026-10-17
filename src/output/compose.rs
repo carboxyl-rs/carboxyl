@@ -820,6 +820,23 @@ mod tests {
     }
 
     #[test]
+    fn detail_that_is_not_an_image_stays_as_blocks() {
+        let mut page = Page::new(8, 2);
+        page.detail(PxRect::new(16.0, 16.0, 48.0, 32.0));
+
+        let (buffer, tiles) = page.render(true);
+        assert!(
+            tiles.is_empty(),
+            "a gradient or control is not worth an upload"
+        );
+        assert_ne!(
+            buffer[(2, 1)].bg,
+            ratatui::style::Color::Reset,
+            "but it is still painted"
+        );
+    }
+
+    #[test]
     fn single_detailed_cells_keep_their_blocks_instead_of_an_upload() {
         let mut page = Page::new(8, 2);
         page.detail(PxRect::new(0.0, 0.0, 8.0, 16.0))

@@ -55,8 +55,8 @@ fn main() -> Result<()> {
     let url =
         Url::from_file_path(&fixture).map_err(|_| anyhow!("fixture path is not a file URL"))?;
 
-    let mut page = Page::new(100, 40)?;
-    page.load(url)?;
+    let mut page = Page::new(100, 40, url.clone())?;
+    page.await_load(&url)?;
 
     let loaded = page.snapshot(&out, "loaded")?;
     loaded.expect(&[
@@ -168,7 +168,7 @@ impl EventLoopWaker for Waker {
 }
 
 impl Page {
-    fn new(cols: u32, rows: u32) -> Result<Self> {
+    fn new(cols: u32, rows: u32, url: Url) -> Result<Self> {
         let preferences = Preferences {
             accessibility_enabled: true,
             ..Preferences::default()
@@ -193,7 +193,7 @@ impl Page {
                 progress: progress.clone(),
                 a11y: a11y.clone(),
             }))
-            .url(Url::parse("about:blank")?)
+            .url(url)
             .build();
 
         webview.show();
@@ -217,9 +217,13 @@ impl Page {
     fn load(&mut self, url: Url) -> Result<()> {
         self.progress.loaded.set(false);
         self.webview.load(url.clone());
+        self.await_load(&url)
+    }
+
+    fn await_load(&mut self, url: &Url) -> Result<()> {
         let deadline = Instant::now() + DEADLINE;
         // Ignore a late load completion from the previous about:blank page.
-        while !(self.progress.loaded.get() && self.webview.url().as_ref() == Some(&url)) {
+        while !(self.progress.loaded.get() && self.webview.url().as_ref() == Some(url)) {
             if Instant::now() > deadline {
                 bail!(
                     "timed out loading {url} (at {:?}, {:?}, loaded flag {})",
