@@ -311,6 +311,22 @@ impl Page {
             format!("{:#?}", frame.text),
         )?;
 
+        // Kept next to the text snapshot so a failure can be looked at, not
+        // just read about.
+        if let Some(image) =
+            image::RgbaImage::from_raw(frame.size.x, frame.size.y, frame.pixels.clone())
+        {
+            image.save(out.join(format!("{name}.png")))?;
+        }
+        let mut boxes = String::new();
+        for text_box in frame.text.iter() {
+            boxes.push_str(&format!(
+                "{:?} depth={} {:?}\n",
+                text_box.rect, text_box.depth, text_box.text
+            ));
+        }
+        std::fs::write(out.join(format!("{name}.boxes.txt")), boxes)?;
+
         let area = Rect::new(0, 0, self.cells.x as u16, self.cells.y as u16);
         let mut buffer = Buffer::empty(area);
         self.canvas.compose(
