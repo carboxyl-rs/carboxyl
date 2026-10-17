@@ -1,5 +1,4 @@
-// src/browser/servo.rs
-
+pub(crate) mod a11y;
 mod delegates;
 mod events;
 mod geometry;
@@ -24,9 +23,9 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::style::available_color_count;
 use rustls::crypto::CryptoProvider;
 
-use crate::cli::Cli;
+use crate::cli::{Cli, GraphicsMode};
 use crate::logger;
-use crate::output::{Window, restore_terminal};
+use crate::output::{DEFAULT_CELL, Graphics, Window, restore_terminal, terminal_cell_size};
 
 pub use keyboard::map_keyboard_event;
 pub use session::Channels;
@@ -40,14 +39,16 @@ const SERVO_STACK_SIZE: usize = 64 * 1024 * 1024;
 const EVENT_CHANNEL_CAPACITY: usize = 512;
 const COMMAND_CHANNEL_CAPACITY: usize = 128;
 
-// ---------------------------------------------------------------------------
-// BrowserConfig
-// ---------------------------------------------------------------------------
+/// Denominator for the CLI `--scale` percentage.
+const SCALE_DIVISOR: f32 = 100.0;
 
 pub struct BrowserConfig {
-    pub window: Window,
+    pub graphics: GraphicsMode,
+    pub native_text: bool,
     pub true_color: bool,
     pub fps: u16,
+    /// Servo page zoom; terminal viewport dimensions stay fixed.
+    pub zoom: f32,
     pub initial_url: ::url::Url,
     pub log_path: Option<PathBuf>,
 }
@@ -58,18 +59,16 @@ impl BrowserConfig {
     pub fn from_cli(cli: &Cli, log_path: Option<PathBuf>) -> Result<Self> {
         Ok(Self {
             log_path,
-            window: Window::read(cli),
-            // crossterm uses its maximum count to report true color.
+            // crossterm reports true color as `u16::MAX`, the largest count it can express.
             true_color: available_color_count() == u16::MAX,
+            graphics: cli.graphics,
+            native_text: !cli.no_native_text,
             fps: cli.fps,
+            zoom: f32::from(cli.scale.max(1)) / SCALE_DIVISOR,
             initial_url: url::normalize_url(cli.url.clone())?,
         })
     }
 }
-
-// ---------------------------------------------------------------------------
-// BrowserRuntime
-// ---------------------------------------------------------------------------
 
 pub struct BrowserRuntime {
     servo_tx: mpsc::SyncSender<events::ServoCommand>,
@@ -94,6 +93,17 @@ impl BrowserRuntime {
 
         let terminal = ratatui::init();
 
+        // Query graphics after entering the alternate screen, before input starts.
+        let graphics = Graphics::detect(cfg.graphics);
+
+        // Match terminal pixels so graphics tiles need no resampling.
+        let cell = graphics
+            .as_ref()
+            .map(Graphics::cell_size)
+            .or_else(terminal_cell_size)
+            .unwrap_or(DEFAULT_CELL);
+        let window = Window::read(cell);
+
         execute!(
             io::stdout(),
             EnableMouseCapture,
@@ -106,22 +116,18 @@ impl BrowserRuntime {
 
         let servo_handle = {
             let event_tx = event_tx.clone();
-            let servo_tx_waker = servo_tx.clone();
-            let initial_url = cfg.initial_url.clone();
-            let browser_size = physical_size(cfg.window.browser);
+            let servo_tx = servo_tx.clone();
+            let setup = servo_thread::Setup {
+                url: cfg.initial_url.clone(),
+                viewport: physical_size(window.viewport()),
+                zoom: cfg.zoom,
+                native_text: cfg.native_text,
+            };
 
             thread::Builder::new()
                 .name("servo".to_owned())
                 .stack_size(SERVO_STACK_SIZE)
-                .spawn(move || {
-                    servo_thread::servo_thread(
-                        event_tx,
-                        servo_tx_waker,
-                        servo_rx,
-                        initial_url,
-                        browser_size,
-                    );
-                })
+                .spawn(move || servo_thread::servo_thread(event_tx, servo_tx, servo_rx, setup))
                 .expect("failed to spawn servo thread")
         };
 
@@ -140,6 +146,8 @@ impl BrowserRuntime {
                 servo_tx,
                 event_rx,
                 terminal,
+                graphics,
+                window,
             },
         ))
     }

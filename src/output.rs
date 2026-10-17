@@ -1,13 +1,16 @@
-mod browser_widget;
-pub(crate) mod color;
-mod native_text;
+mod color;
+mod compose;
+mod graphics;
 mod nav_widget;
+mod page;
+mod raster;
 mod window;
 
-pub use browser_widget::{BrowserFrame, BrowserWidget};
-pub use native_text::TextOverlay;
+pub use compose::{Canvas, Options as ComposeOptions};
+pub use graphics::Graphics;
 pub use nav_widget::{NavAction, NavState, NavWidget, NavigationCapability};
-pub use window::Window;
+pub use page::{PageFrame, PxRect, TextBox};
+pub use window::{DEFAULT_CELL, NAV_BAR_ROWS, Window, terminal_cell_size};
 
 use ratatui::crossterm::event::{DisableMouseCapture, PopKeyboardEnhancementFlags};
 use ratatui::crossterm::execute;

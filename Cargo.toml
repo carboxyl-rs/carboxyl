@@ -17,13 +17,31 @@ categories = ["command-line-utilities", "web-programming"]
 
 [dependencies]
 rustls = "0.23"
-servo = {git = "https://github.com/philocalyst/servo", branch = "carboxyl"}
+# Disable desktop clipboard support for terminal and SSH sessions.
+servo = { version = "0.7", default-features = false, features = [
+  "bundled",
+  "js_jit",
+  "multiprocess",
+  "webcrypto",
+  "webgl",
+  "brotli-compression-stream",
+] }
+# Match Servo's AccessKit version so tree updates share the same types.
+accesskit_consumer = "0.35"
 url = "2.5"
 clap = { version = "4", features = ["derive"] }
-ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache"] }
+ratatui = { version = "0.30", default-features = false, features = [
+  "crossterm",
+  "layout-cache",
+] }
+ratatui-image = { version = "11.1", default-features = false, features = [
+  "crossterm",
+] }
+image = { version = "0.25", default-features = false }
 rustix = { version = "1", features = ["termios", "stdio", "process"] }
 dpi = "0.1"
 unicode-width = "0.2"
+unicode-segmentation = "1.13"
 log = "0.4"
 simplelog = "0.12"
 glam = "0.33"

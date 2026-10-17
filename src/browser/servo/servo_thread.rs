@@ -1,9 +1,11 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
 use dpi::PhysicalSize;
+use glam::UVec2;
 use log::error;
 use servo::{
     DeviceIntPoint, DeviceIntRect, DeviceIntSize, Preferences, RenderingContext, ServoBuilder,
@@ -11,35 +13,39 @@ use servo::{
 };
 use url::Url;
 
-use crate::output::BrowserFrame;
+use crate::output::PageFrame;
 
+use super::a11y::Accessibility;
 use super::delegates::{TerminalServoDelegate, TerminalWebViewDelegate};
 use super::events::{RuntimeEvent, ServoCommand};
 use super::waker::ServoWaker;
 
-// ---------------------------------------------------------------------------
-// Timing constants
-// ---------------------------------------------------------------------------
+/// Yield between Servo turns while keeping timers and animations responsive.
+const SPIN_SLEEP: Duration = Duration::from_millis(1);
 
-/// Brief sleep after each `spin_event_loop` call. Prevents the servo thread
-/// from monopolising a core between paint cycles while still allowing
-/// Servo's own timers and animation frames to fire promptly.
-const SERVO_SPIN_SLEEP: Duration = Duration::from_millis(1);
+/// Live documents per history direction; older entries reload on navigation.
+const SESSION_HISTORY_MAX_LENGTH: i64 = 3;
 
-// ---------------------------------------------------------------------------
-// PendingOps - batch-accumulates commands drained from the servo channel
-// ---------------------------------------------------------------------------
+/// How the Servo thread should start up.
+pub struct Setup {
+    pub url: Url,
+    pub viewport: PhysicalSize<u32>,
+    pub zoom: f32,
+    pub native_text: bool,
+}
 
+/// Commands accumulated while draining the queue in one pass, so a burst is
+/// handled in a single Servo turn rather than one turn each.
 #[derive(Default)]
-struct PendingOps {
+struct Pending {
     shutdown: bool,
     paint: bool,
     resize: Option<PhysicalSize<u32>>,
 }
 
-impl PendingOps {
-    fn apply(&mut self, cmd: ServoCommand, webview: &WebView) {
-        match cmd {
+impl Pending {
+    fn apply(&mut self, command: ServoCommand, webview: &WebView) {
+        match command {
             ServoCommand::Shutdown => self.shutdown = true,
             ServoCommand::Load(url) => webview.load(url),
             ServoCommand::GoBack => {
@@ -54,122 +60,123 @@ impl PendingOps {
             }
             ServoCommand::Reload => webview.reload(),
             ServoCommand::Resize(size) => self.resize = Some(size),
-            ServoCommand::Input(ev) => {
-                webview.notify_input_event(ev);
+            ServoCommand::Input(event) => {
+                webview.notify_input_event(event);
             }
             ServoCommand::Paint => self.paint = true,
+            ServoCommand::Wake => {}
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Thread entry point
-// ---------------------------------------------------------------------------
 
 pub fn servo_thread(
     event_tx: mpsc::SyncSender<RuntimeEvent>,
     servo_tx: mpsc::SyncSender<ServoCommand>,
     servo_rx: mpsc::Receiver<ServoCommand>,
-    url: Url,
-    browser_size: PhysicalSize<u32>,
+    setup: Setup,
 ) {
     let servo = ServoBuilder::default()
-        .preferences(browser_preferences(Preferences::default()))
-        .event_loop_waker(Box::new(ServoWaker::new(servo_tx.clone())))
+        .preferences(preferences(setup.native_text))
+        .event_loop_waker(Box::new(ServoWaker::new(servo_tx)))
         .build();
 
     servo.set_delegate(Rc::new(TerminalServoDelegate));
 
     let rendering_context: Rc<dyn RenderingContext> =
-        match SoftwareRenderingContext::new(browser_size) {
-            Ok(ctx) => Rc::new(ctx),
-            Err(e) => {
-                error!("failed to create rendering context: {e:?}");
+        match SoftwareRenderingContext::new(setup.viewport) {
+            Ok(context) => Rc::new(context),
+            Err(error) => {
+                error!("failed to create rendering context: {error:?}");
                 let _ = event_tx.try_send(RuntimeEvent::Exit);
                 return;
             }
         };
 
+    let a11y = Rc::new(RefCell::new(None));
     let delegate: Rc<dyn WebViewDelegate> = Rc::new(TerminalWebViewDelegate {
         event_tx: event_tx.clone(),
+        a11y: a11y.clone(),
     });
 
     let webview = WebViewBuilder::new(&servo, rendering_context.clone())
         .delegate(delegate)
-        .url(url)
+        .url(setup.url)
         .build();
 
     webview.show();
-    webview.focus();
+    webview.set_focused(true);
+    webview.set_page_zoom(setup.zoom);
 
-    while let Ok(cmd) = servo_rx.recv() {
-        let mut ops = PendingOps::default();
-        ops.apply(cmd, &webview);
-        while let Ok(cmd) = servo_rx.try_recv() {
-            ops.apply(cmd, &webview);
+    if setup.native_text {
+        // The graft must exist before any update from Servo is applied, so the
+        // tree is built here from the id activation hands back.
+        match webview.set_accessibility_active(true) {
+            Some(tree_id) => *a11y.borrow_mut() = Some(Accessibility::new(tree_id)),
+            None => error!("servo declined to activate accessibility; text stays rasterised"),
+        }
+    }
+
+    while let Ok(command) = servo_rx.recv() {
+        let mut pending = Pending::default();
+        pending.apply(command, &webview);
+        while let Ok(command) = servo_rx.try_recv() {
+            pending.apply(command, &webview);
         }
 
-        if ops.shutdown {
+        if pending.shutdown {
             break;
         }
 
-        if let Some(size) = ops.resize {
+        if let Some(size) = pending.resize {
             webview.resize(size);
         }
 
         servo.spin_event_loop();
 
-        if ops.paint
-            && let Some(frame) = paint(&webview, rendering_context.as_ref())
+        if pending.paint
+            && let Some(frame) = paint(&webview, rendering_context.as_ref(), &a11y)
         {
             let _ = event_tx.try_send(RuntimeEvent::Frame(frame));
         }
 
-        thread::sleep(SERVO_SPIN_SLEEP);
+        thread::sleep(SPIN_SLEEP);
     }
 }
 
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
-
-fn paint(webview: &WebView, ctx: &dyn RenderingContext) -> Option<BrowserFrame> {
-    use glam::{UVec2, Vec2};
-
-    ctx.make_current().ok()?;
+/// Read pixels and text from the same Servo turn to keep scroll positions aligned.
+fn paint(
+    webview: &WebView,
+    context: &dyn RenderingContext,
+    a11y: &RefCell<Option<Accessibility>>,
+) -> Option<PageFrame> {
+    context.make_current().ok()?;
     webview.paint();
 
-    let size = ctx.size();
-    let rect = DeviceIntRect::from_origin_and_size(
+    let size = context.size();
+    let image = context.read_to_image(DeviceIntRect::from_origin_and_size(
         DeviceIntPoint::new(0, 0),
         DeviceIntSize::new(size.width as i32, size.height as i32),
-    );
+    ))?;
+    context.present();
 
-    let image = ctx.read_to_image(rect)?;
-    ctx.present();
+    let text = a11y
+        .borrow_mut()
+        .as_mut()
+        .map(Accessibility::boxes)
+        .unwrap_or_else(|| Vec::new().into());
 
-    // Read the offset the renderer just composited with, so the overlay aligns
-    // with these exact pixels regardless of async-scroll timing.
-    let scroll_offset = webview
-        .root_scroll_offset()
-        .map(|(x, y)| Vec2::new(x, y))
-        .unwrap_or(Vec2::ZERO);
-
-    Some(BrowserFrame {
+    Some(PageFrame {
         size: UVec2::new(image.width(), image.height()),
         pixels: image.into_raw(),
-        scroll_offset,
+        text,
     })
 }
 
-fn browser_preferences(mut p: Preferences) -> Preferences {
-    p.network_http_proxy_uri.clear();
-    p.network_https_proxy_uri.clear();
-    p.network_http_no_proxy.clear();
-    // Capture the display list so the overlay knows where the text is and
-    // its real color, and stop Servo from rasterizing the glyphs itself so
-    // the overlay is the only text on screen - no doubling, no color loss.
-    p.layout_display_list_capture_enabled = true;
-    p.layout_text_painting_enabled = false;
-    p
+fn preferences(native_text: bool) -> Preferences {
+    Preferences {
+        session_history_max_length: SESSION_HISTORY_MAX_LENGTH,
+        // Off by default upstream, and all that native text needs.
+        accessibility_enabled: native_text,
+        ..Preferences::default()
+    }
 }

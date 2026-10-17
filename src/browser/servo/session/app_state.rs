@@ -1,71 +1,68 @@
-use servo::DisplayList;
+use crate::output::{NavState, NavigationCapability, PageFrame, Window};
 
-use crate::output::{BrowserFrame, NavState, NavigationCapability, Window};
-
-use crate::browser::servo::{events::DelegateEvent, geometry::BrowserPoint};
-
-// ---------------------------------------------------------------------------
-// AppState
-// ---------------------------------------------------------------------------
+use super::events::DelegateEvent;
 
 /// All mutable runtime state for the lifetime of a browser session.
 pub struct AppState {
     pub running: bool,
-    pub pending_paint: bool,
+    /// Something changed that the terminal has not been shown yet.
+    pub dirty: bool,
     pub window: Window,
     pub nav: NavState,
-    pub pointer: BrowserPoint,
-    pub frame: Option<BrowserFrame>,
-    /// The most recently delivered display-list snapshot from Servo's layout
-    /// engine. Text runs are in document/viewport space; the per-frame
-    /// `BrowserFrame::scroll_offset` supplies the live scroll position.
-    pub display_list: Option<DisplayList>,
+    pub frame: Option<PageFrame>,
 }
 
 impl AppState {
     pub fn new(window: Window) -> Self {
         Self {
             running: true,
-            pending_paint: true,
+            dirty: true,
             window,
             nav: NavState::default(),
-            pointer: BrowserPoint::default(),
             frame: None,
-            display_list: None,
         }
     }
 
     pub fn mark_dirty(&mut self) {
-        self.pending_paint = true;
+        self.dirty = true;
     }
 
     pub fn stop(&mut self) {
         self.running = false;
     }
 
-    pub fn apply_frame(&mut self, frame: BrowserFrame) {
+    /// Skip identical frames; keep frames crossing a resize for clipped display.
+    pub fn apply_frame(&mut self, frame: PageFrame) {
+        if self
+            .frame
+            .as_ref()
+            .is_some_and(|current| current.matches(&frame))
+        {
+            return;
+        }
         self.frame = Some(frame);
         self.mark_dirty();
     }
 
-    /// Returns the new `Window` if the viewport actually changed, so the
-    /// caller knows whether to forward a resize command to servo.
+    /// Returns the new window if the viewport actually changed, so the caller
+    /// knows whether to forward a resize to Servo.
     pub fn apply_resize(&mut self, cols: u16, rows: u16) -> Option<Window> {
-        let next = self.window.resize(cols, rows);
-        if next.differs_from(&self.window) {
-            self.window = next;
-            self.mark_dirty();
-            Some(self.window.clone())
-        } else {
-            None
+        let next = self.window.resized(cols, rows);
+        if next == self.window {
+            return None;
         }
+        self.window = next;
+        self.mark_dirty();
+        Some(self.window)
     }
 
-    /// Mutates nav state. Returns `Some(title)` when the terminal title OSC
-    /// sequence should be emitted - keeping that I/O side-effect out of here.
-    pub fn apply_delegate(&mut self, ev: DelegateEvent) -> Option<String> {
-        match ev {
+    /// Apply a delegate event. Returns `Some(title)` when the terminal title
+    /// should be set, keeping that side effect out of here.
+    pub fn apply_delegate(&mut self, event: DelegateEvent) -> Option<String> {
+        match event {
             DelegateEvent::UrlChanged(url) => {
+                // Keep the current capability flags: HistoryChanged follows
+                // immediately with the authoritative back/forward state.
                 let nav = self.nav.nav;
                 self.nav.push(url, nav);
             }
@@ -82,7 +79,6 @@ impl AppState {
                         forward: can_go_forward,
                     },
                 );
-                self.display_list = None;
             }
 
             DelegateEvent::TitleChanged(title) => {
@@ -90,24 +86,10 @@ impl AppState {
                 return Some(title);
             }
 
-            DelegateEvent::Closed => {
-                self.stop();
-            }
+            DelegateEvent::Closed => self.stop(),
         }
 
         self.mark_dirty();
         None
-    }
-
-    pub fn apply_display_list(&mut self, dl: DisplayList) {
-        if self
-            .display_list
-            .as_ref()
-            .is_some_and(|current| dl.epoch < current.epoch)
-        {
-            return;
-        }
-        self.display_list = Some(dl);
-        self.mark_dirty();
     }
 }

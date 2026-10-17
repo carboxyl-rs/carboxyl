@@ -21,6 +21,6 @@ impl EventLoopWaker for ServoWaker {
     }
 
     fn wake(&self) {
-        let _ = self.tx.try_send(ServoCommand::Paint);
+        let _ = self.tx.try_send(ServoCommand::Wake);
     }
 }
