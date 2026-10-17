@@ -80,6 +80,24 @@ $ cargo build --release --locked
 
 The build is now a normal Cargo build for the `carboxyl` binary. The first build will download the published `servo` crate and its dependencies through Cargo.
 
+## Validation
+
+```console
+$ cargo test --locked
+$ cargo clippy --locked --workspace --all-targets -- -D warnings
+$ cargo run --release --locked --example render_smoke -- target/render-smoke
+```
+
+Composition is a pure function of a page frame, so the cases that are easy to get
+wrong - occlusion, fixed headers, scrolled boxes, wrapping, wide graphemes,
+inline layout, graphics tiling - are covered by ordinary unit tests in
+`cargo test`, with no Servo, no network and no window server.
+
+`render_smoke` is the end-to-end check: it drives real Servo layout and software
+rendering over `tests/fixtures/rendering.html`, which is built to exercise those
+same cases, then scrolls, resizes and navigates away. It writes a text snapshot
+of each screen to `target/render-smoke`.
+
 ## Runtime Architecture
 
 - `browser::servo` owns the browser runtime.
