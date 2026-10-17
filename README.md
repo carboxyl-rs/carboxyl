@@ -78,7 +78,8 @@ WebXR, and GStreamer media are not enabled in the default terminal build.
 $ cargo build --release --locked
 ```
 
-The build is now a normal Cargo build for the `carboxyl` binary. The first build will download the published `servo` crate and its dependencies through Cargo.
+The build is a normal Cargo build for the `carboxyl` binary. The first build will download the published `servo` crate and its dependencies through Cargo.
+Building with the release profile may take more time, but avoids panics on runtime and generates a faster binary.
 
 ## Validation
 
@@ -117,10 +118,3 @@ running `render_smoke` to register the fixture's font families, as CI does.
 * A fancy browser ui and more features (history, cookies*, tabs, etc)
 
 * Text selection and copy, now that the text is real glyphs
-
-## Notes
-
-- While this is in the 'servo-dev' branch, discuss on #16.
-- Please build only with --release, otherwise you may get panics on runtime. Release builds might take some time, but way less than compiling chromium.
-- Servo evolves quickly. If Cargo resolution or toolchain requirements drift, align the local toolchain with upstream Servo and refresh the lockfile.
-- Legacy Chromium files may still exist in older branches or release artifacts, but they are no longer part of the supported runtime path in this branch.
