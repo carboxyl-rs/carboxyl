@@ -677,4 +677,17 @@ mod tests {
         let (pixels_only, _) = page.render(false);
         assert_ne!(&row(&pixels_only, 0)[..3], "abc");
     }
+
+    #[test]
+    fn a_covered_box_is_left_to_the_pixels() {
+        // The box is in the tree with its text, but something opaque was
+        // painted over it, so the cells hold one flat color and no ink.
+        let mut page = Page::new(6, 2);
+        page.fill(PxRect::new(0.0, 16.0, 48.0, 32.0), (20, 33, 53))
+            .text(PxRect::new(0.0, 16.0, 48.0, 32.0), 1, "hidden");
+
+        let (buffer, _) = page.render(true);
+        assert_eq!(row(&buffer, 1), "      ");
+        assert_eq!(buffer[(0, 1)].bg, to_terminal_color((20, 33, 53), true));
+    }
 }
