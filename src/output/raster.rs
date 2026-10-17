@@ -340,3 +340,29 @@ fn blend(a: Rgb, b: Rgb) -> Rgb {
         ((u16::from(a.2) + u16::from(b.2)) / 2) as u8,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CELL: UVec2 = UVec2::new(2, 2);
+
+    /// A `width` x `height` opaque frame painted by `paint`.
+    fn frame(width: u32, height: u32, paint: impl Fn(u32, u32) -> Rgb) -> Vec<u8> {
+        let mut data = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                let (r, g, b) = paint(x, y);
+                data.extend_from_slice(&[r, g, b, 255]);
+            }
+        }
+        data
+    }
+
+    #[test]
+    fn rejects_buffers_that_do_not_match_their_size() {
+        assert!(Pixels::new(&[0; 16], CELL).is_some());
+        assert!(Pixels::new(&[0; 15], CELL).is_none());
+        assert!(Pixels::new(&[], UVec2::ZERO).is_none());
+    }
+}
