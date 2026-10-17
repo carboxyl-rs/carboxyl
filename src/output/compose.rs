@@ -523,3 +523,136 @@ fn merge_tiles(grid: &Grid, detailed: &[bool], out: &mut Vec<Rect>) {
         out.truncate(MAX_TILES);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::page::PxRect;
+
+    const CELL: UVec2 = UVec2::new(8, 16);
+    const PAPER: Rgb = (255, 255, 255);
+    const INK: Rgb = (0, 0, 0);
+
+    /// A page frame built in the units the renderer works in: cells for the
+    /// terminal grid, device pixels for everything Servo painted.
+    struct Page {
+        size: UVec2,
+        pixels: Vec<u8>,
+        boxes: Vec<TextBox>,
+    }
+
+    impl Page {
+        fn new(cols: u32, rows: u32) -> Self {
+            let size = UVec2::new(cols * CELL.x, rows * CELL.y);
+            Self {
+                size,
+                pixels: [PAPER.0, PAPER.1, PAPER.2, 255].repeat((size.x * size.y) as usize),
+                boxes: Vec::new(),
+            }
+        }
+
+        fn set(&mut self, x: u32, y: u32, (r, g, b): Rgb) {
+            if x >= self.size.x || y >= self.size.y {
+                return;
+            }
+            let index = ((y * self.size.x + x) * 4) as usize;
+            self.pixels[index..index + 3].copy_from_slice(&[r, g, b]);
+        }
+
+        fn fill(&mut self, rect: PxRect, color: Rgb) -> &mut Self {
+            for y in rect.y0 as u32..rect.y1 as u32 {
+                for x in rect.x0 as u32..rect.x1 as u32 {
+                    self.set(x, y, color);
+                }
+            }
+            self
+        }
+
+        /// What a line of text looks like to the sampler: a band of sparse ink
+        /// a few pixels below the top of its line box.
+        fn line(&mut self, rect: PxRect) -> &mut Self {
+            let top = rect.y0 as u32 + 4;
+            for y in top..top + 6 {
+                for x in (rect.x0 as u32..rect.x1 as u32).step_by(3) {
+                    self.set(x, y, INK);
+                }
+            }
+            self
+        }
+
+        /// Detail no single color describes, so the cell wants real pixels.
+        fn detail(&mut self, rect: PxRect) -> &mut Self {
+            for y in rect.y0 as u32..rect.y1 as u32 {
+                for x in rect.x0 as u32..rect.x1 as u32 {
+                    if (x + y) % 2 == 0 {
+                        self.set(x, y, INK);
+                    }
+                }
+            }
+            self
+        }
+
+        fn text(&mut self, rect: PxRect, depth: u16, text: &str) -> &mut Self {
+            self.boxes.push(TextBox {
+                rect,
+                text: text.to_owned(),
+                depth,
+            });
+            self
+        }
+
+        fn render(&self, native_text: bool) -> (Buffer, Vec<Rect>) {
+            self.render_into(
+                Rect::new(
+                    0,
+                    0,
+                    (self.size.x / CELL.x) as u16,
+                    (self.size.y / CELL.y) as u16,
+                ),
+                native_text,
+            )
+        }
+
+        fn render_into(&self, area: Rect, native_text: bool) -> (Buffer, Vec<Rect>) {
+            let mut buffer = Buffer::empty(area);
+            let frame = PageFrame {
+                size: self.size,
+                pixels: self.pixels.clone(),
+                text: self.boxes.clone().into(),
+            };
+            let mut canvas = Canvas::default();
+            let tiles = canvas
+                .compose(
+                    area,
+                    &mut buffer,
+                    &frame,
+                    CELL,
+                    Options {
+                        true_color: true,
+                        native_text,
+                    },
+                )
+                .to_vec();
+            (buffer, tiles)
+        }
+    }
+
+    fn row(buffer: &Buffer, row: u16) -> String {
+        (0..buffer.area.width)
+            .map(|col| buffer[(buffer.area.x + col, buffer.area.y + row)].symbol())
+            .collect()
+    }
+
+    #[test]
+    fn a_flat_page_becomes_styled_spaces_and_wants_no_pixels() {
+        let (buffer, tiles) = Page::new(4, 2).render(true);
+        assert_eq!(row(&buffer, 0), "    ");
+        assert_eq!(row(&buffer, 1), "    ");
+        assert_eq!(
+            buffer[(0, 0)].bg,
+            to_terminal_color(PAPER, true),
+            "a flat cell keeps the page's own background color"
+        );
+        assert!(tiles.is_empty());
+    }
+}
