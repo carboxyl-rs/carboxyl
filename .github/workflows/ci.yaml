@@ -1,19 +1,17 @@
-name: Rust
+name: CI
 
 on:
   push:
+    branches: [ "main" ]
   pull_request:
-  workflow_dispatch:
-  schedule:
-    - cron: '0 0 1 * *'
+    branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Test, Fmt, Clippy
-    runs-on: self-hosted # giant-rat (runs arch linux), provided by lysator :)
+  build:
+    runs-on: self-hosted # Lysator giant-rat (Arch Linux).
 
     steps:
       - uses: actions/checkout@v6
@@ -23,10 +21,10 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Run Tests
+      - name: Test
         run: cargo test --verbose
 
-      - name: Format Check
+      - name: Format check
         run: cargo fmt --all -- --check
 
       - name: Clippy
