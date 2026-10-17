@@ -374,4 +374,20 @@ mod tests {
         assert_eq!(cell.background, (10, 20, 30));
         assert_eq!(cell.ink, (10, 20, 30));
     }
+
+    #[test]
+    fn ink_is_the_minority_color_and_background_the_majority() {
+        // Three dark pixels and one bright one: dark is the background.
+        let data = frame(2, 2, |x, y| {
+            if x == 1 && y == 1 {
+                (250, 250, 250)
+            } else {
+                (0, 0, 0)
+            }
+        });
+        let cell = Pixels::new(&data, CELL).unwrap().cell(0, 0, CELL);
+        assert_eq!(cell.background, (0, 0, 0));
+        assert_eq!(cell.ink, (250, 250, 250));
+        assert!(!cell.is_flat());
+    }
 }
