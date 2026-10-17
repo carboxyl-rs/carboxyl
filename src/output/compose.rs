@@ -11,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use super::color::{Rgb, to_terminal_color};
-use super::page::{PageFrame, TextBox};
+use super::page::{PageFrame, PxRect, TextBox};
 use super::raster::{Band, Pixels};
 
 /// Smallest region worth handing to a graphics protocol. Anything smaller keeps
@@ -151,7 +151,7 @@ impl Canvas {
                                 background,
                                 options.true_color,
                             ));
-                            self.detailed[index] = true;
+                            self.detailed[index] = in_image(&frame.images, &grid, col, row);
                         }
                     }
                 }
@@ -174,6 +174,16 @@ impl Canvas {
         merge_tiles(&grid, &self.detailed, &mut self.tiles);
         &self.tiles
     }
+}
+
+/// Whether a cell centre lies inside an image region eligible for upload.
+/// Other detailed cells keep their quadrant blocks.
+fn in_image(images: &[PxRect], grid: &Grid, col: u16, row: u16) -> bool {
+    let x = (f32::from(col) + 0.5) * grid.cell.x as f32;
+    let y = (f32::from(row) + 0.5) * grid.cell.y as f32;
+    images
+        .iter()
+        .any(|rect| x >= rect.x0 && x < rect.x1 && y >= rect.y0 && y < rect.y1)
 }
 
 /// How a frame should be drawn.
@@ -527,7 +537,6 @@ fn merge_tiles(grid: &Grid, detailed: &[bool], out: &mut Vec<Rect>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::output::page::PxRect;
 
     const CELL: UVec2 = UVec2::new(8, 16);
     const PAPER: Rgb = (255, 255, 255);
@@ -591,6 +600,12 @@ mod tests {
                     }
                 }
             }
+            self
+        }
+
+        /// Mark bounds as eligible for graphics uploads.
+        fn image(&mut self, rect: PxRect) -> &mut Self {
+            self.images.push(rect);
             self
         }
 
@@ -785,6 +800,7 @@ mod tests {
     fn graphics_tiles_cover_the_detailed_cells_and_never_a_glyph() {
         let mut page = Page::new(8, 2);
         page.detail(PxRect::new(16.0, 16.0, 48.0, 32.0))
+            .image(PxRect::new(16.0, 16.0, 48.0, 32.0))
             .line(PxRect::new(0.0, 0.0, 24.0, 16.0))
             .text(PxRect::new(0.0, 0.0, 24.0, 16.0), 1, "hi");
 
@@ -806,7 +822,8 @@ mod tests {
     #[test]
     fn single_detailed_cells_keep_their_blocks_instead_of_an_upload() {
         let mut page = Page::new(8, 2);
-        page.detail(PxRect::new(0.0, 0.0, 8.0, 16.0));
+        page.detail(PxRect::new(0.0, 0.0, 8.0, 16.0))
+            .image(PxRect::new(0.0, 0.0, 8.0, 16.0));
         let (_, tiles) = page.render(true);
         assert!(tiles.is_empty(), "one cell is not worth a tile");
     }
