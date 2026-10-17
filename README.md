@@ -102,6 +102,8 @@ of each screen to `target/render-smoke`.
 
 - `browser::servo` owns the browser runtime and is the only place Servo's types appear.
 - Servo is embedded through `ServoBuilder`, `WebViewBuilder`, and `SoftwareRenderingContext`.
+- `browser::servo::servo_thread` produces one `PageFrame` per composite: Servo's pixels plus the text painted into them.
+- `output::compose` turns a `PageFrame` into terminal cells, and `output::graphics` draws the few regions that need real pixels.
 - Terminal input (by crossterm) is translated directly into Servo input events.
 - Output is being handled with ratatui.
 
