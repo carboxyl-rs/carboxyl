@@ -29,3 +29,14 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Render with Servo
+        run: cargo run --release --locked --example render_smoke -- target/render-smoke
+
+      - name: Upload render snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-smoke
+          path: target/render-smoke
+          if-no-files-found: ignore
