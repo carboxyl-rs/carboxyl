@@ -655,4 +655,26 @@ mod tests {
         );
         assert!(tiles.is_empty());
     }
+
+    #[test]
+    fn native_glyphs_land_where_the_page_painted_text() {
+        let mut page = Page::new(6, 2);
+        page.line(PxRect::new(0.0, 0.0, 48.0, 16.0)).text(
+            PxRect::new(0.0, 0.0, 48.0, 16.0),
+            1,
+            "abc",
+        );
+
+        let (buffer, _) = page.render(true);
+        assert_eq!(&row(&buffer, 0)[..3], "abc");
+        assert_eq!(
+            buffer[(0, 0)].fg,
+            to_terminal_color(INK, true),
+            "glyph color comes from the ink Servo painted"
+        );
+
+        // Without native text the same frame is pixels all the way down.
+        let (pixels_only, _) = page.render(false);
+        assert_ne!(&row(&pixels_only, 0)[..3], "abc");
+    }
 }
