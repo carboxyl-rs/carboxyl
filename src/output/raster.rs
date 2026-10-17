@@ -390,4 +390,30 @@ mod tests {
         assert_eq!(cell.ink, (250, 250, 250));
         assert!(!cell.is_flat());
     }
+
+    #[test]
+    fn a_cell_belongs_with_a_line_when_it_shows_the_same_paint() {
+        let cell_of = |paint: &dyn Fn(u32, u32) -> Rgb| {
+            let data = frame(2, 2, paint);
+            Pixels::new(&data, CELL).unwrap().cell(0, 0, CELL)
+        };
+
+        // A line of dark text on white paper.
+        let line = cell_of(&|x, y| {
+            if x == 1 && y == 1 {
+                (10, 10, 10)
+            } else {
+                (250, 250, 250)
+            }
+        });
+
+        // Blank paper after the last word is part of the same line.
+        assert!(cell_of(&|_, _| (250, 250, 250)).belongs_with(&line));
+        // So is a cell the text fills, where the pen is what dominates.
+        assert!(cell_of(&|_, _| (10, 10, 10)).belongs_with(&line));
+        // Another element drawn over the line is not.
+        assert!(!cell_of(&|_, _| (20, 33, 53)).belongs_with(&line));
+        // A gentle gradient still reads as the same surface.
+        assert!(cell_of(&|_, _| (240, 240, 240)).belongs_with(&line));
+    }
 }
