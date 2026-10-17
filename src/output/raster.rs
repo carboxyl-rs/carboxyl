@@ -416,4 +416,22 @@ mod tests {
         // A gentle gradient still reads as the same surface.
         assert!(cell_of(&|_, _| (240, 240, 240)).belongs_with(&line));
     }
+
+    #[test]
+    fn quadrant_blocks_follow_the_brighter_corners() {
+        let data = frame(
+            2,
+            2,
+            |x, _| {
+                if x == 0 { (255, 255, 255) } else { (0, 0, 0) }
+            },
+        );
+        let (symbol, foreground, background) = Pixels::new(&data, CELL)
+            .unwrap()
+            .cell(0, 0, CELL)
+            .quadrant();
+        assert_eq!(symbol, '▌');
+        assert_eq!(foreground, (255, 255, 255));
+        assert_eq!(background, (0, 0, 0));
+    }
 }
