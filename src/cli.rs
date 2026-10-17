@@ -57,3 +57,23 @@ impl Cli {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_command_line_is_well_formed() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn scale_becomes_a_page_zoom_multiplier() {
+        let parse = |args: &[&str]| Cli::try_parse_from(args).unwrap();
+        assert_eq!(parse(&["carboxyl"]).scale, 100);
+        assert_eq!(parse(&["carboxyl", "--scale", "250"]).scale, 250);
+        assert!(!parse(&["carboxyl"]).no_native_text);
+        assert!(parse(&["carboxyl", "--no-native-text"]).no_native_text);
+    }
+}
