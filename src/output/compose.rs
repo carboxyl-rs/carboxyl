@@ -690,4 +690,17 @@ mod tests {
         assert_eq!(row(&buffer, 1), "      ");
         assert_eq!(buffer[(0, 1)].bg, to_terminal_color((20, 33, 53), true));
     }
+
+    #[test]
+    fn an_enclosing_box_flows_around_a_nested_one() {
+        // <div>Fir <span>mid</span> end</div>: the span is deeper, so it takes
+        // its own columns first and the div's text flows around them.
+        let mut page = Page::new(12, 1);
+        page.line(PxRect::new(0.0, 0.0, 88.0, 16.0))
+            .text(PxRect::new(0.0, 0.0, 88.0, 16.0), 2, "Fir  end")
+            .text(PxRect::new(32.0, 0.0, 56.0, 16.0), 4, "mid");
+
+        let (buffer, _) = page.render(true);
+        assert_eq!(row(&buffer, 0), "Fir mid end ");
+    }
 }
