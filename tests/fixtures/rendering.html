@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Carboxyl rendering lab</title>
+<style>
+  * { box-sizing: border-box }
+  body { margin: 0; background: #101827; color: #dbe5f1; font: 16px/26px sans-serif }
+  header { position: fixed; top: 0; width: 100%; height: 40px; padding: 6px 26px;
+    background: #1d3048; color: #67e8c5; z-index: 5 }
+  main { margin: 64px 26px 32px; max-width: 680px }
+  h1 { color: #f8fafc; margin: 0 0 16px; font-size: 28px; line-height: 36px }
+  h2 { color: #67e8c5; font-size: 18px; margin: 20px 0 8px }
+  p { margin: 12px 0 }
+  a { color: #83bcff }
+  .card { padding: 14px 18px; background: #1c2940; border-left: 4px solid #67e8c5 }
+  pre { background: #0a111e; padding: 12px; font: 14px/26px monospace }
+  #scroller { height: 78px; overflow: auto; background: #25364b; padding: 0 12px }
+  #scroller p { margin: 0; height: 26px }
+  #hidden { opacity: 0 }
+  #covered, #cover { position: absolute; top: 620px; left: 26px; width: 240px; height: 26px }
+  #cover { background: #142135; z-index: 2 }
+  footer { margin-top: 350px; padding: 20px; background: #1d3048 }
+  #image { position: absolute; right: 26px; top: 64px; width: 64px; height: 40px }
+</style>
+<header>CARBOXYL / Rendering lab</header>
+<img id="image" alt="Orange and teal blocks" width="64" height="40"
+  src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='40'%3E%3Cpath fill='%23f97316' d='M0 0h32v40H0z'/%3E%3Cpath fill='%2367e8c5' d='M32 0h32v40H32z'/%3E%3C/svg%3E">
+<main>
+  <h1>Servo, in your terminal.</h1>
+  <div class="card">First sibling <a href="about:blank">linked words</a> last sibling.</div>
+  <p id="wrapped">Wrapped paragraphs should keep every word, including the final phrase. Native glyphs stay readable while Servo handles layout, backgrounds, images, and scrolling.</p>
+  <h2>Small details matter</h2>
+  <p>Unicode: café é 中文 👩‍💻. Spacing: one two three.</p>
+  <pre>let browser = Servo::new();
+    // indentation survives
+    browser.paint();</pre>
+  <h2>Independent scrolling</h2>
+  <div id="scroller"><p>Nested first row</p><p>Nested second row</p><p>Nested third row</p><p>Nested fourth row</p><p>Nested fifth row</p></div>
+  <p id="hidden">INVISIBLE SENTINEL</p>
+  <span id="covered">OCCLUDED SENTINEL</span><span id="cover"></span>
+  <footer>Bottom of the document. The fixed header stays in place.</footer>
+</main>
+</html>
