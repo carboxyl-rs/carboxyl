@@ -31,7 +31,6 @@ pub struct Setup {
     pub url: Url,
     pub viewport: PhysicalSize<u32>,
     pub zoom: f32,
-    pub native_text: bool,
 }
 
 /// Commands accumulated while draining the queue in one pass, so a burst is
@@ -76,7 +75,7 @@ pub fn servo_thread(
     setup: Setup,
 ) {
     let servo = ServoBuilder::default()
-        .preferences(preferences(setup.native_text))
+        .preferences(preferences())
         .event_loop_waker(Box::new(ServoWaker::new(servo_tx)))
         .build();
 
@@ -107,13 +106,11 @@ pub fn servo_thread(
     webview.set_focused(true);
     webview.set_page_zoom(setup.zoom);
 
-    if setup.native_text {
-        // The graft must exist before any update from Servo is applied, so the
-        // tree is built here from the id activation hands back.
-        match webview.set_accessibility_active(true) {
-            Some(tree_id) => *a11y.borrow_mut() = Some(Accessibility::new(tree_id)),
-            None => error!("servo declined to activate accessibility; text stays rasterised"),
-        }
+    // Create the graft before updates arrive, even with native text disabled:
+    // image detection also uses accessibility.
+    match webview.set_accessibility_active(true) {
+        Some(tree_id) => *a11y.borrow_mut() = Some(Accessibility::new(tree_id)),
+        None => error!("servo declined to activate accessibility; text stays rasterised"),
     }
 
     while let Ok(command) = servo_rx.recv() {
@@ -173,11 +170,11 @@ fn paint(
     })
 }
 
-fn preferences(native_text: bool) -> Preferences {
+fn preferences() -> Preferences {
     Preferences {
         session_history_max_length: SESSION_HISTORY_MAX_LENGTH,
-        // Off by default upstream, and all that native text needs.
-        accessibility_enabled: native_text,
+        // Off by default upstream; the source of text and of image regions.
+        accessibility_enabled: true,
         ..Preferences::default()
     }
 }

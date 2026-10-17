@@ -121,7 +121,6 @@ impl BrowserRuntime {
                 url: cfg.initial_url.clone(),
                 viewport: physical_size(window.viewport()),
                 zoom: cfg.zoom,
-                native_text: cfg.native_text,
             };
 
             thread::Builder::new()
