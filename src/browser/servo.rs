@@ -77,6 +77,7 @@ pub struct BrowserRuntime {
     servo_tx: mpsc::SyncSender<events::ServoCommand>,
     servo_handle: Option<thread::JoinHandle<()>>,
     log_path: Option<PathBuf>,
+    stderr_guard: Option<logger::StderrGuard>,
     // Prefixed with `_` because these are held purely for their Drop side-effect
     // (keeping the threads alive). They are never read after construction.
     _signal_handle: thread::JoinHandle<()>,
@@ -86,6 +87,7 @@ pub struct BrowserRuntime {
 impl BrowserRuntime {
     pub fn spawn(cfg: &BrowserConfig) -> Result<(Self, Channels)> {
         install_rustls_provider()?;
+        let stderr_guard = logger::StderrGuard::redirect(cfg.log_path.as_deref())?;
 
         let (event_tx, event_rx) =
             mpsc::sync_channel::<events::RuntimeEvent>(EVENT_CHANNEL_CAPACITY);
@@ -129,6 +131,7 @@ impl BrowserRuntime {
             servo_tx: servo_tx.clone(),
             servo_handle: Some(servo_handle),
             log_path: cfg.log_path.clone(),
+            stderr_guard: Some(stderr_guard),
             _signal_handle: signal_thread::spawn_signal_thread(event_tx.clone()),
             _input_handle: input_thread::spawn_input_thread(event_tx),
         };
@@ -155,6 +158,7 @@ impl Drop for BrowserRuntime {
         }
 
         restore_terminal();
+        self.stderr_guard.take();
         logger::print_log_path_if_nonempty(self.log_path.take());
     }
 }
