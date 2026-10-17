@@ -93,3 +93,67 @@ impl AppState {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use glam::UVec2;
+
+    use crate::output::DEFAULT_CELL;
+
+    use super::*;
+
+    fn state() -> AppState {
+        AppState::new(Window {
+            cells: UVec2::new(4, 2),
+            cell: DEFAULT_CELL,
+        })
+    }
+
+    fn frame(size: UVec2, pixel: u8) -> PageFrame {
+        PageFrame {
+            size,
+            pixels: vec![pixel; (size.x * size.y * 4) as usize],
+            text: Vec::new().into(),
+        }
+    }
+
+    #[test]
+    fn a_frame_in_flight_across_a_resize_is_still_shown() {
+        let mut app = state();
+        app.apply_frame(frame(UVec2::new(100, 100), 1));
+        assert!(
+            app.frame.is_some(),
+            "the renderer clips a wrong-sized frame rather than blanking the page"
+        );
+    }
+
+    #[test]
+    fn an_identical_frame_does_not_cost_a_redraw() {
+        let mut app = state();
+        app.apply_frame(frame(app.window.viewport(), 1));
+        app.dirty = false;
+
+        app.apply_frame(frame(app.window.viewport(), 1));
+        assert!(
+            !app.dirty,
+            "the same pixels and the same text: nothing to do"
+        );
+
+        app.apply_frame(frame(app.window.viewport(), 2));
+        assert!(app.dirty);
+    }
+
+    #[test]
+    fn a_resize_is_reported_once_and_keeps_the_page_on_screen() {
+        let mut app = state();
+        app.apply_frame(frame(app.window.viewport(), 1));
+
+        let resized = app.apply_resize(10, 5).expect("the viewport changed");
+        assert_eq!(resized.cells, UVec2::new(10, 4));
+        assert!(
+            app.frame.is_some(),
+            "the last frame stays up until the next"
+        );
+        assert!(app.apply_resize(10, 5).is_none(), "no change, no resize");
+    }
+}
