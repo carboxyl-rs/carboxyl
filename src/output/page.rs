@@ -62,10 +62,15 @@ pub struct PageFrame {
 }
 
 impl PageFrame {
-    /// Whether pixels and the shared text allocation match `other`.
+    /// Whether pixels and text contents match `other`.
     pub fn matches(&self, other: &Self) -> bool {
         self.size == other.size
-            && Arc::ptr_eq(&self.text, &other.text)
+            && same(&self.text, &other.text)
             && self.pixels == other.pixels
     }
+}
+
+/// Compare shared allocations first, then separately allocated contents.
+fn same<T: PartialEq>(a: &Arc<[T]>, b: &Arc<[T]>) -> bool {
+    Arc::ptr_eq(a, b) || a == b
 }
