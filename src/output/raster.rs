@@ -434,4 +434,28 @@ mod tests {
         assert_eq!(foreground, (255, 255, 255));
         assert_eq!(background, (0, 0, 0));
     }
+
+    #[test]
+    fn text_rows_finds_one_band_per_line_and_drops_underlines() {
+        // A 10x24 box: glyph bands at y 2..6 and y 12..16, plus a one-pixel
+        // underline at y 9, all on white. Cells are 8px tall, so the two lines
+        // land on rows 0 and 1 and the underline is too short to count.
+        let data = frame(10, 24, |_, y| {
+            if (2..6).contains(&y) || (12..16).contains(&y) || y == 9 {
+                (0, 0, 0)
+            } else {
+                (255, 255, 255)
+            }
+        });
+        let mut bands = Vec::new();
+        Pixels::new(&data, UVec2::new(10, 24)).unwrap().text_rows(
+            PxRect::new(0.0, 0.0, 10.0, 24.0),
+            UVec2::new(10, 8),
+            &mut bands,
+        );
+        assert_eq!(
+            bands,
+            vec![Band { row: 0, col: 0 }, Band { row: 1, col: 0 }]
+        );
+    }
 }
