@@ -807,4 +807,19 @@ mod tests {
         let (_, tiles) = page.render(true);
         assert!(tiles.is_empty(), "one cell is not worth a tile");
     }
+
+    #[test]
+    fn a_viewport_smaller_than_its_area_leaves_nothing_behind() {
+        let page = Page::new(2, 1);
+        let (buffer, _) = page.render_into(Rect::new(0, 0, 5, 2), true);
+        for row_index in 0..2 {
+            for col in 0..5 {
+                let cell = &buffer[(col, row_index)];
+                assert_eq!(cell.symbol(), " ");
+                if col >= 2 || row_index >= 1 {
+                    assert_eq!(cell.bg, ratatui::style::Color::Reset);
+                }
+            }
+        }
+    }
 }
