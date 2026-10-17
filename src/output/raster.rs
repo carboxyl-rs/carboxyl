@@ -365,4 +365,13 @@ mod tests {
         assert!(Pixels::new(&[0; 15], CELL).is_none());
         assert!(Pixels::new(&[], UVec2::ZERO).is_none());
     }
+
+    #[test]
+    fn a_solid_region_is_flat_and_keeps_its_color() {
+        let data = frame(2, 2, |_, _| (10, 20, 30));
+        let cell = Pixels::new(&data, CELL).unwrap().cell(0, 0, CELL);
+        assert!(cell.is_flat());
+        assert_eq!(cell.background, (10, 20, 30));
+        assert_eq!(cell.ink, (10, 20, 30));
+    }
 }
