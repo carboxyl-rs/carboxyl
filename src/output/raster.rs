@@ -507,4 +507,20 @@ mod tests {
         );
         assert_eq!(bands, vec![Band { row: 0, col: 2 }]);
     }
+
+    #[test]
+    fn out_of_bounds_geometry_is_clamped_rather_than_panicking() {
+        let data = frame(4, 4, |_, _| (0, 0, 0));
+        let pixels = Pixels::new(&data, UVec2::new(4, 4)).unwrap();
+        let mut bands = Vec::new();
+        for rect in [
+            PxRect::new(-100.0, -100.0, 1000.0, 1000.0),
+            PxRect::new(10.0, 10.0, 20.0, 20.0),
+            PxRect::new(0.0, 0.0, 0.0, 0.0),
+            PxRect::new(f32::NAN, 0.0, f32::INFINITY, 4.0),
+        ] {
+            pixels.text_rows(rect, CELL, &mut bands);
+        }
+        let _ = pixels.cell(1000, 1000, CELL);
+    }
 }
