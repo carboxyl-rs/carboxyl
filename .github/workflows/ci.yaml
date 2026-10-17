@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: self-hosted # Lysator giant-rat (Arch Linux).
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Test
+        run: cargo test --locked --verbose
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: Render with Servo
+        env:
+          FONTCONFIG_FILE: ${{ github.workspace }}/tests/fixtures/fonts/fonts.conf
+          XDG_CACHE_HOME: ${{ runner.temp }}/carboxyl-font-cache
+        run: |
+          sans_family="$(fc-match -f '%{family}' sans-serif)"
+          mono_family="$(fc-match -f '%{family}' monospace)"
+          printf 'Fixture fonts: %s / %s\n' "$sans_family" "$mono_family"
+          test "$sans_family" = 'Noto Sans'
+          test "$mono_family" = 'Noto Sans Mono'
+          cargo run --release --locked --example render_smoke -- target/render-smoke
+
+      - name: Upload render snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-smoke
+          path: target/render-smoke
+          if-no-files-found: ignore

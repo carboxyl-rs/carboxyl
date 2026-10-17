@@ -1,105 +1,116 @@
-use core::mem::MaybeUninit;
-use std::str::FromStr;
+//! Terminal geometry: the viewport is `cells * cell` device pixels.
+//! Cell alignment keeps clicks and graphics crops exact; Servo handles page zoom.
 
-use crate::{cli::CommandLine, gfx::Size, utils::log};
+use glam::UVec2;
+use rustix::stdio::stdout;
+use rustix::termios::{Winsize, tcgetwinsize};
 
-/// A terminal window.
-#[derive(Clone, Debug)]
+/// Rows reserved for the navigation bar at the top of the terminal.
+pub const NAV_BAR_ROWS: u16 = 1;
+
+/// Cell size assumed when the terminal will not report one: the 1:2 ratio
+/// nearly every terminal font has, at a size where a page's default 16px text
+/// comes to roughly one character per cell.
+pub const DEFAULT_CELL: UVec2 = UVec2::new(8, 16);
+
+const FALLBACK_COLS: u16 = 80;
+const FALLBACK_ROWS: u16 = 24;
+
+/// The browser viewport is never empty, however small the terminal gets.
+const MIN_CELLS: UVec2 = UVec2::ONE;
+
+/// Terminal dimensions, in cells and in device pixels per cell.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Window {
-    /// Device pixel ratio
-    pub dpi: f32,
-    /// Size of a terminal cell in pixels
-    pub scale: Size<f32>,
-    /// Size of the termina window in cells
-    pub cells: Size,
-    /// Size of the browser window in pixels
-    pub browser: Size,
-    /// Command line arguments
-    pub cmd: CommandLine,
+    /// Browser viewport in cells; the navigation bar row is already excluded.
+    pub cells: UVec2,
+    /// Device pixels per terminal cell.
+    pub cell: UVec2,
 }
 
 impl Window {
-    /// Read the window
-    pub fn read() -> Window {
-        let mut window = Self {
-            dpi: 1.0,
-            scale: (0.0, 0.0).into(),
-            cells: (0, 0).into(),
-            browser: (0, 0).into(),
-            cmd: CommandLine::parse(),
-        };
-
-        window.update();
-
-        window
+    /// Read the terminal's current size, using `cell` for the cell geometry.
+    pub fn read(cell: UVec2) -> Self {
+        let Winsize { ws_col, ws_row, .. } = winsize();
+        Self {
+            cells: browser_cells(ws_col, ws_row),
+            cell: cell.max(MIN_CELLS),
+        }
     }
 
-    pub fn update(&mut self) -> &Self {
-        let (mut term, mut cell) = unsafe {
-            let mut ptr = MaybeUninit::<libc::winsize>::uninit();
-
-            if libc::ioctl(libc::STDOUT_FILENO, libc::TIOCGWINSZ, ptr.as_mut_ptr()) == 0 {
-                let size = ptr.assume_init();
-
-                (
-                    Size::new(size.ws_col, size.ws_row),
-                    Size::new(size.ws_xpixel, size.ws_ypixel),
-                )
-            } else {
-                (Size::splat(0), Size::splat(0))
-            }
-        };
-
-        if cell.width == 0 || cell.height == 0 {
-            cell.width = 8;
-            cell.height = 16;
+    /// The same window after a resize to `cols` x `rows` terminal cells.
+    pub fn resized(self, cols: u16, rows: u16) -> Self {
+        Self {
+            cells: browser_cells(cols, rows),
+            ..self
         }
+    }
 
-        if term.width == 0 || term.height == 0 {
-            let cols = match parse_var("COLUMNS").unwrap_or(0) {
-                0 => 80,
-                x => x,
-            };
-            let rows = match parse_var("LINES").unwrap_or(0) {
-                0 => 24,
-                x => x,
-            };
-
-            log::warning!(
-                "TIOCGWINSZ returned an empty size ({}x{}), defaulting to {}x{}",
-                term.width,
-                term.height,
-                cols,
-                rows
-            );
-
-            term.width = cols;
-            term.height = rows;
-        }
-
-        let zoom = 1.5 * self.cmd.zoom;
-        let cells = Size::new(term.width.max(1), term.height.max(2) - 1);
-        let auto_scale = false;
-        let cell_pixels = if auto_scale {
-            Size::new(cell.width as f32, cell.height as f32) / cells.cast()
-        } else {
-            Size::new(8.0, 16.0)
-        };
-        // Normalize the cells dimensions for an aspect ratio of 1:2
-        let cell_width = (cell_pixels.width + cell_pixels.height / 2.0) / 2.0;
-
-        // Round DPI to 2 decimals for proper viewport computations
-        self.dpi = (2.0 / cell_width * zoom * 100.0).ceil() / 100.0;
-        // A virtual cell should contain a 2x4 pixel quadrant
-        self.scale = Size::new(2.0, 4.0) / self.dpi;
-        // Keep some space for the UI
-        self.cells = Size::new(term.width.max(1), term.height.max(2) - 1).cast();
-        self.browser = self.cells.cast::<f32>().mul(self.scale).ceil().cast();
-
-        self
+    /// The Servo viewport in device pixels: an exact multiple of [`Self::cell`].
+    pub fn viewport(&self) -> UVec2 {
+        self.cells * self.cell
     }
 }
 
-fn parse_var<T: FromStr>(var: &str) -> Option<T> {
-    std::env::var(var).ok()?.parse().ok()
+/// The cell size the terminal reports through `TIOCGWINSZ`, if it reports one.
+///
+/// Terminals that fill in the pixel fields give the real cell size for free,
+/// with no escape-sequence round trip and no risk of eating a keystroke.
+pub fn terminal_cell_size() -> Option<UVec2> {
+    let Winsize {
+        ws_col,
+        ws_row,
+        ws_xpixel,
+        ws_ypixel,
+    } = winsize();
+    (ws_xpixel > 0 && ws_ypixel > 0 && ws_col > 0 && ws_row > 0)
+        .then(|| UVec2::new(u32::from(ws_xpixel / ws_col), u32::from(ws_ypixel / ws_row)))
+        .filter(|cell| cell.x > 0 && cell.y > 0)
+}
+
+fn winsize() -> Winsize {
+    tcgetwinsize(stdout()).unwrap_or(Winsize {
+        ws_col: FALLBACK_COLS,
+        ws_row: FALLBACK_ROWS,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    })
+}
+
+fn browser_cells(cols: u16, rows: u16) -> UVec2 {
+    UVec2::new(
+        u32::from(cols),
+        u32::from(rows.saturating_sub(NAV_BAR_ROWS)),
+    )
+    .max(MIN_CELLS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_viewport_is_always_a_whole_number_of_cells() {
+        let window = Window {
+            cells: UVec2::new(80, 23),
+            cell: DEFAULT_CELL,
+        };
+        assert_eq!(window.viewport(), UVec2::new(640, 368));
+        assert_eq!(window.viewport() % window.cell, UVec2::ZERO);
+    }
+
+    #[test]
+    fn a_minimised_terminal_still_has_somewhere_to_render() {
+        let window = Window {
+            cells: UVec2::new(80, 23),
+            cell: DEFAULT_CELL,
+        };
+        let resized = window.resized(0, 0);
+        assert_eq!(resized.cells, UVec2::ONE);
+        assert!(resized.viewport().min_element() > 0);
+
+        // One row is the navigation bar, so a two-row terminal has one left.
+        assert_eq!(window.resized(10, 2).cells, UVec2::new(10, 1));
+        assert_eq!(window.resized(10, 1).cells, UVec2::new(10, 1));
+    }
 }

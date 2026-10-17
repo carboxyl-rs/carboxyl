@@ -1,5 +1,79 @@
-mod cli;
-mod program;
+use clap::{ArgAction, Parser, ValueEnum};
 
-pub use cli::*;
-pub use program::*;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum GraphicsMode {
+    #[default]
+    Auto,
+    Kitty,
+    Sixel,
+    Quadrant,
+}
+
+#[derive(Parser, Debug, Clone)]
+#[command(
+    name = "carboxyl",
+    version,
+    about = "Carboxyl is a Servo-based browser for the terminal."
+)]
+pub struct Cli {
+    /// URL to open
+    pub url: Option<String>,
+
+    /// Framerate. Maximum frames per second.
+    /// Lower values reduce terminal rendering overhead and can make
+    /// page interaction feel smoother under load.
+    #[arg(short = 'f', long = "fps", default_value_t = 60)]
+    pub fps: u16,
+
+    /// Page zoom percentage (100 = default).
+    /// Higher values zoom in and make page content larger.
+    /// Lower values zoom out and show more content at once.
+    #[arg(short = 's', long = "scale", default_value_t = 100)]
+    pub scale: u16,
+
+    /// Image protocol. Unsupported terminals automatically use quadrant blocks.
+    #[arg(long, value_enum, default_value_t = GraphicsMode::Auto)]
+    pub graphics: GraphicsMode,
+
+    /// Render text as pixels instead of native terminal glyphs.
+    #[arg(long = "no-native-text", action = ArgAction::SetTrue)]
+    pub no_native_text: bool,
+
+    /// Increase log verbosity. Pass up to four times for progressively
+    /// finer output: -v = warn, -vv = info, -vvv = debug, -vvvv = trace.
+    #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+    pub verbosity: u8,
+}
+
+impl Cli {
+    /// Resolve the requested verbosity to a `log::LevelFilter`.
+    pub fn log_level(&self) -> log::LevelFilter {
+        match self.verbosity {
+            0 => log::LevelFilter::Error,
+            1 => log::LevelFilter::Warn,
+            2 => log::LevelFilter::Info,
+            3 => log::LevelFilter::Debug,
+            _ => log::LevelFilter::Trace,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_command_line_is_well_formed() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn scale_becomes_a_page_zoom_multiplier() {
+        let parse = |args: &[&str]| Cli::try_parse_from(args).unwrap();
+        assert_eq!(parse(&["carboxyl"]).scale, 100);
+        assert_eq!(parse(&["carboxyl", "--scale", "250"]).scale, 250);
+        assert!(!parse(&["carboxyl"]).no_native_text);
+        assert!(parse(&["carboxyl", "--no-native-text"]).no_native_text);
+    }
+}

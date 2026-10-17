@@ -1,15 +1,61 @@
 [package]
 name = "carboxyl"
-version = "0.0.4-rc.0"
-edition = "2021"
+version = "0.1.0"
+edition = "2024"
+description = "A terminal web browser built on Servo, a community fork of Carbonyl."
+authors = [
+  "Fathy Boundjadj <fathy.boundjadj@gmail.com>",
+  "Orhun Parmaksiz <orhunparmaksiz@gmail.com>",
+  "gold-silver-copper",
+  "philocalyst",
+  "takashialpha <takashialpha@protonmail.com>",
+]
+license = "BSD-3-Clause"
+repository = "https://github.com/carboxyl-rs/carboxyl"
+keywords = ["browser", "terminal", "servo", "tui", "cli"]
+categories = ["command-line-utilities", "web-programming"]
 
 [dependencies]
-libc = "0.2"
-unicode-width = "0.1.10"
-unicode-segmentation = "1.10.0"
-chrono = "0.4.23"
+rustls = "0.23"
+# Disable desktop clipboard support for terminal and SSH sessions.
+servo = { version = "0.7", default-features = false, features = [
+  "bundled",
+  "js_jit",
+  "multiprocess",
+  "webcrypto",
+  "webgl",
+  "brotli-compression-stream",
+] }
+# Match Servo's AccessKit version so tree updates share the same types.
+accesskit_consumer = "0.35"
+url = "2.5"
+clap = { version = "4", features = ["derive"] }
+ratatui = { version = "0.30", default-features = false, features = [
+  "crossterm",
+  "layout-cache",
+] }
+ratatui-image = { version = "11.1", default-features = false, features = [
+  "crossterm",
+] }
+image = { version = "0.25", default-features = false }
+rustix = { version = "1", features = ["termios", "stdio", "process"] }
+dpi = "0.1"
+unicode-width = "0.2"
+unicode-segmentation = "1.13"
+log = "0.4"
+simplelog = "0.12"
+glam = "0.33"
+signal-hook = "0.4"
+anyhow = "1"
 
-[lib]
-name = "carboxyl"
-path = "src/lib.rs"
-crate-type = ["cdylib"]
+[[example]]
+name = "render_smoke"
+test = true
+
+# Release optimizations.
+[profile.release]
+strip = true
+# Reduce link time while retaining cross-crate optimization.
+lto = "thin"
+codegen-units = 1
+panic = "abort"
