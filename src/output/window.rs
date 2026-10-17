@@ -84,3 +84,33 @@ fn browser_cells(cols: u16, rows: u16) -> UVec2 {
     )
     .max(MIN_CELLS)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_viewport_is_always_a_whole_number_of_cells() {
+        let window = Window {
+            cells: UVec2::new(80, 23),
+            cell: DEFAULT_CELL,
+        };
+        assert_eq!(window.viewport(), UVec2::new(640, 368));
+        assert_eq!(window.viewport() % window.cell, UVec2::ZERO);
+    }
+
+    #[test]
+    fn a_minimised_terminal_still_has_somewhere_to_render() {
+        let window = Window {
+            cells: UVec2::new(80, 23),
+            cell: DEFAULT_CELL,
+        };
+        let resized = window.resized(0, 0);
+        assert_eq!(resized.cells, UVec2::ONE);
+        assert!(resized.viewport().min_element() > 0);
+
+        // One row is the navigation bar, so a two-row terminal has one left.
+        assert_eq!(window.resized(10, 2).cells, UVec2::new(10, 1));
+        assert_eq!(window.resized(10, 1).cells, UVec2::new(10, 1));
+    }
+}
