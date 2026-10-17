@@ -24,7 +24,8 @@ impl WebViewDelegate for TerminalWebViewDelegate {
     }
 
     fn notify_page_title_changed(&self, _: WebView, title: Option<String>) {
-        let title = title.unwrap_or_else(|| "Carboxyl".to_owned());
+        let mut title = title.unwrap_or_else(|| "Carboxyl".to_owned());
+        title.retain(|character| !character.is_control());
         let _ = self
             .event_tx
             .try_send(RuntimeEvent::Delegate(DelegateEvent::TitleChanged(title)));
