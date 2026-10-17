@@ -40,9 +40,6 @@ const SERVO_STACK_SIZE: usize = 64 * 1024 * 1024;
 const EVENT_CHANNEL_CAPACITY: usize = 512;
 const COMMAND_CHANNEL_CAPACITY: usize = 128;
 
-// 2^24 distinct colors.
-const TRUE_COLOR_COUNT: u32 = 1 << 24;
-
 // ---------------------------------------------------------------------------
 // BrowserConfig
 // ---------------------------------------------------------------------------
@@ -62,7 +59,8 @@ impl BrowserConfig {
         Ok(Self {
             log_path,
             window: Window::read(cli),
-            true_color: u32::from(available_color_count()) >= TRUE_COLOR_COUNT,
+            // crossterm uses its maximum count to report true color.
+            true_color: available_color_count() == u16::MAX,
             fps: cli.fps,
             initial_url: url::normalize_url(cli.url.clone())?,
         })
