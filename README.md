@@ -96,7 +96,8 @@ inline layout, graphics tiling - are covered by ordinary unit tests in
 `render_smoke` is the end-to-end check: it drives real Servo layout and software
 rendering over `tests/fixtures/rendering.html`, which is built to exercise those
 same cases, then scrolls, resizes and navigates away. It writes a text snapshot
-of each screen to `target/render-smoke`.
+and the text box geometry of each screen to `target/render-smoke`. The fixture
+bundles its fonts so this check also works on hosts without system fonts.
 
 ## Runtime Architecture
 

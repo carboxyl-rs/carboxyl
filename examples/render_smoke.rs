@@ -62,8 +62,6 @@ fn main() -> Result<()> {
     loaded.expect(&[
         // Wrapped paragraphs keep every word.
         "Servo, in your terminal.",
-        "Wrapped paragraphs should keep every word, including the final phrase.",
-        "Native glyphs stay readable while Servo handles layout",
         // Unicode, including graphemes wider than one cell.
         "Spacing: one two three.",
         // Preformatted text keeps its own line breaks.
@@ -72,6 +70,7 @@ fn main() -> Result<()> {
         // A nested scroller's rows are laid out like any other box.
         "Nested first row",
     ])?;
+    loaded.expect_wrapped("Wrapped paragraphs should keep every word, including the final phrase. Native glyphs stay readable while Servo handles layout, backgrounds, images, and scrolling.")?;
     loaded.reject(&[
         // Both sentinels are in the accessibility tree with real geometry.
         // Neither is visible, so neither may be drawn.
@@ -307,6 +306,10 @@ impl Page {
             text,
             images,
         };
+        std::fs::write(
+            out.join(format!("{name}-boxes.txt")),
+            format!("{:#?}", frame.text),
+        )?;
 
         let area = Rect::new(0, 0, self.cells.x as u16, self.cells.y as u16);
         let mut buffer = Buffer::empty(area);
@@ -379,6 +382,16 @@ impl Screen {
         Ok(())
     }
 
+    /// Wrapped prose may cross terminal rows; all words must still survive.
+    fn expect_wrapped(&self, needle: &str) -> Result<()> {
+        let text = self.text().split_whitespace().collect::<Vec<_>>().join(" ");
+        let flat = needle.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !text.contains(&flat) {
+            bail!("{}: expected {needle:?}\n{}", self.name, self.text());
+        }
+        Ok(())
+    }
+
     /// All of `needles` on one row, in this order: the check that inline
     /// siblings around a nested box come out in document order.
     fn order(&self, needles: &[&str]) -> Result<()> {
@@ -411,5 +424,54 @@ impl Screen {
             "{}: expected {needle:?} near the top, got {top:?}",
             self.name
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wrapped_screen() -> Screen {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 2));
+        buffer.set_string(0, 0, "Native glyphs", ratatui::style::Style::default());
+        buffer.set_string(0, 1, "stay readable", ratatui::style::Style::default());
+        Screen {
+            buffer,
+            name: "wrapped".to_owned(),
+        }
+    }
+
+    #[test]
+    fn wrapped_expectation_accepts_a_row_break() {
+        assert!(
+            wrapped_screen()
+                .expect_wrapped("Native glyphs stay readable")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn wrapped_expectation_rejects_missing_words() {
+        assert!(
+            wrapped_screen()
+                .expect_wrapped("Native glyphs always stay readable")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn wrapped_expectation_accepts_blank_rows_between_lines() {
+        let mut screen = wrapped_screen();
+        screen.buffer.resize(Rect::new(0, 0, 20, 3));
+        screen.buffer.set_string(
+            0,
+            1,
+            "                    ",
+            ratatui::style::Style::default(),
+        );
+        screen
+            .buffer
+            .set_string(0, 2, "stay readable", ratatui::style::Style::default());
+        assert!(screen.expect_wrapped("Native glyphs stay readable").is_ok());
     }
 }

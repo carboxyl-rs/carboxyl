@@ -99,7 +99,11 @@ fn collect(
     }
 
     let anchor = match node.bounding_box() {
-        Some(rect) if rect.width() >= MIN_BOX_PIXELS && rect.height() >= MIN_BOX_PIXELS => {
+        Some(rect)
+            if rect.width() >= MIN_BOX_PIXELS
+                && rect.height() >= MIN_BOX_PIXELS
+                && !is_inline(node.role()) =>
+        {
             if matches!(
                 node.role(),
                 Role::Image | Role::Canvas | Role::Video | Role::SvgRoot
@@ -131,6 +135,25 @@ fn collect(
     for child in node.children() {
         collect(child, depth.saturating_add(1), anchor, out, images);
     }
+}
+
+/// Phrasing content that flows inside its parent's text. Laid out as a box of
+/// its own it would break the parent's words around it, because the terminal's
+/// monospace columns never line up with a proportional font's. Its text joins
+/// the parent's in document order instead; the pixels still carry its colors.
+fn is_inline(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Link
+            | Role::Emphasis
+            | Role::Strong
+            | Role::Code
+            | Role::Mark
+            | Role::Abbr
+            | Role::Time
+            | Role::ContentInsertion
+            | Role::ContentDeletion
+    )
 }
 
 /// Boxes are rebuilt on demand; per-node callbacks need no work.

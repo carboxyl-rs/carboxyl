@@ -32,6 +32,9 @@ type Painted = Option<(Rgb, Rgb)>;
 pub struct Canvas {
     /// Per cell: the colors of the native glyph that owns it, if any.
     glyphs: Vec<Painted>,
+    /// Cells directly above or below a glyph, where the glyph's own ink spills
+    /// over a cell boundary. They are painted as plain background.
+    halo: Vec<bool>,
     /// Per cell: whether it still wants real pixels.
     detailed: Vec<bool>,
     text: TextScratch,
@@ -111,6 +114,8 @@ impl Canvas {
         let cells = usize::from(grid.cols) * usize::from(grid.rows);
         self.glyphs.clear();
         self.glyphs.resize(cells, None);
+        self.halo.clear();
+        self.halo.resize(cells, false);
         self.detailed.clear();
         self.detailed.resize(cells, false);
 
@@ -121,6 +126,7 @@ impl Canvas {
                 &grid,
                 buf,
                 &mut self.glyphs,
+                &mut self.halo,
                 &mut self.text,
             );
         }
@@ -139,7 +145,8 @@ impl Canvas {
                     }
                     None => {
                         let sample = pixels.cell(col, row, grid.cell);
-                        if sample.is_flat() {
+                        let spill = self.halo[index] && !in_image(&frame.images, &grid, col, row);
+                        if sample.is_flat() || spill {
                             target.set_symbol(" ").set_style(
                                 Style::new()
                                     .bg(to_terminal_color(sample.background, options.true_color)),
@@ -205,6 +212,7 @@ fn place_text(
     grid: &Grid,
     buf: &mut Buffer,
     glyphs: &mut [Painted],
+    halo: &mut [bool],
     scratch: &mut TextScratch,
 ) {
     // Deepest boxes first: a link inside a paragraph claims its own cells
@@ -292,6 +300,7 @@ fn place_text(
                 grid,
                 buf,
                 glyphs,
+                halo,
             );
         }
     }
@@ -306,6 +315,7 @@ fn draw_line(
     grid: &Grid,
     buf: &mut Buffer,
     glyphs: &mut [Painted],
+    halo: &mut [bool],
 ) {
     let mut col = slot.col0;
 
@@ -363,6 +373,13 @@ fn draw_line(
                 target.set_symbol(if offset == 0 { grapheme } else { "" });
             }
             glyphs[grid.index(col + offset, slot.row)] = Some((sample.ink, sample.background));
+            for row in [slot.row.checked_sub(1), slot.row.checked_add(1)]
+                .into_iter()
+                .flatten()
+                .filter(|row| *row < grid.rows)
+            {
+                halo[grid.index(col + offset, row)] = true;
+            }
         }
         col += width;
     }
@@ -833,6 +850,23 @@ mod tests {
             buffer[(2, 1)].bg,
             ratatui::style::Color::Reset,
             "but it is still painted"
+        );
+    }
+
+    #[test]
+    fn ink_spilling_past_a_glyph_row_is_not_drawn_as_blocks() {
+        let mut page = Page::new(8, 3);
+        // Text ink straddling the boundary between rows 0 and 1.
+        page.detail(PxRect::new(0.0, 8.0, 24.0, 24.0))
+            .line(PxRect::new(0.0, 0.0, 24.0, 16.0))
+            .text(PxRect::new(0.0, 0.0, 24.0, 16.0), 1, "hi");
+
+        let (buffer, _) = page.render(true);
+        assert_eq!(&row(&buffer, 0)[..2], "hi");
+        assert_eq!(
+            buffer[(0, 1)].symbol(),
+            " ",
+            "the spill under a glyph is background"
         );
     }
 
