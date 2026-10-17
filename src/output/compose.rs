@@ -868,4 +868,10 @@ mod tests {
         preformatted("\tone two three", 12, &mut lines);
         assert_eq!(lines, ["    one two", "    three"]);
     }
+
+    #[test]
+    fn collapsing_matches_css_white_space_normal() {
+        assert_eq!(collapse(" a \n\t b  "), "a b");
+        assert_eq!(collapse("   "), "");
+    }
 }
