@@ -488,4 +488,23 @@ mod tests {
         );
         assert!(bands.is_empty());
     }
+
+    #[test]
+    fn a_line_reports_the_cell_its_ink_starts_in() {
+        // A 32x16 box whose text begins 18 pixels in, as padding would put it.
+        let data = frame(32, 16, |x, y| {
+            if (4..12).contains(&y) && x >= 18 {
+                (0, 0, 0)
+            } else {
+                (255, 255, 255)
+            }
+        });
+        let mut bands = Vec::new();
+        Pixels::new(&data, UVec2::new(32, 16)).unwrap().text_rows(
+            PxRect::new(0.0, 0.0, 32.0, 16.0),
+            UVec2::new(8, 16),
+            &mut bands,
+        );
+        assert_eq!(bands, vec![Band { row: 0, col: 2 }]);
+    }
 }
