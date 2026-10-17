@@ -100,7 +100,7 @@ of each screen to `target/render-smoke`.
 
 ## Runtime Architecture
 
-- `browser::servo` owns the browser runtime.
+- `browser::servo` owns the browser runtime and is the only place Servo's types appear.
 - Servo is embedded through `ServoBuilder`, `WebViewBuilder`, and `SoftwareRenderingContext`.
 - Terminal input (by crossterm) is translated directly into Servo input events.
 - Output is being handled with ratatui.
