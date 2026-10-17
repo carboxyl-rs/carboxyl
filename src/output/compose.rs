@@ -851,4 +851,21 @@ mod tests {
         wrap("x", 0, &mut lines);
         assert_eq!(lines, ["x"]);
     }
+
+    #[test]
+    fn preformatted_wrapping_keeps_indentation_and_drops_edge_blanks() {
+        let mut lines = Vec::new();
+
+        preformatted("\nfn main() {\n    body();\n}\n", 40, &mut lines);
+        assert_eq!(lines, ["fn main() {", "    body();", "}"]);
+
+        // Interior blank lines are part of the listing and stay.
+        preformatted("a\n\nb", 40, &mut lines);
+        assert_eq!(lines, ["a", "", "b"]);
+
+        // Tabs become spaces so widths are measurable, and a line too long for
+        // the box wraps under its own indentation.
+        preformatted("\tone two three", 12, &mut lines);
+        assert_eq!(lines, ["    one two", "    three"]);
+    }
 }
