@@ -703,4 +703,20 @@ mod tests {
         let (buffer, _) = page.render(true);
         assert_eq!(row(&buffer, 0), "Fir mid end ");
     }
+
+    #[test]
+    fn something_drawn_over_part_of_a_line_takes_those_cells() {
+        // A fixed header, a dropdown, a modal: the box is still in the tree
+        // with all its text, but three cells of it now show another element.
+        // Those three are left to the pixel layer and the rest of the line
+        // stays where it was.
+        let mut page = Page::new(10, 1);
+        page.line(PxRect::new(0.0, 0.0, 80.0, 16.0))
+            .fill(PxRect::new(32.0, 0.0, 56.0, 16.0), (20, 33, 53))
+            .text(PxRect::new(0.0, 0.0, 80.0, 16.0), 1, "abcdefghij");
+
+        let (buffer, _) = page.render(true);
+        assert_eq!(row(&buffer, 0), "abcd   hij");
+        assert_eq!(buffer[(5, 0)].bg, to_terminal_color((20, 33, 53), true));
+    }
 }
