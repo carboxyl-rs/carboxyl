@@ -719,4 +719,22 @@ mod tests {
         assert_eq!(row(&buffer, 0), "abcd   hij");
         assert_eq!(buffer[(5, 0)].bg, to_terminal_color((20, 33, 53), true));
     }
+
+    #[test]
+    fn wrapped_text_is_spread_down_its_box() {
+        let mut page = Page::new(10, 3);
+        page.line(PxRect::new(0.0, 0.0, 80.0, 16.0))
+            .line(PxRect::new(0.0, 16.0, 40.0, 32.0))
+            .line(PxRect::new(0.0, 32.0, 40.0, 48.0))
+            .text(
+                PxRect::new(0.0, 0.0, 80.0, 48.0),
+                1,
+                "alpha beta gamma delta",
+            );
+
+        let (buffer, _) = page.render(true);
+        assert_eq!(row(&buffer, 0), "alpha beta");
+        assert_eq!(row(&buffer, 1), "gamma     ");
+        assert_eq!(row(&buffer, 2), "delta     ");
+    }
 }
