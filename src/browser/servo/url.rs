@@ -15,7 +15,7 @@ pub fn normalize_url(raw: Option<String>) -> Result<Url> {
     }
 
     if Path::new(&raw).exists() {
-        return Url::from_file_path(Path::new(&raw)).map_err(|_| {
+        return Url::from_file_path(std::path::absolute(&raw)?).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("failed to convert path to file URL: {raw}"),
