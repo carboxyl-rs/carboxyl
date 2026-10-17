@@ -737,4 +737,23 @@ mod tests {
         assert_eq!(row(&buffer, 1), "gamma     ");
         assert_eq!(row(&buffer, 2), "delta     ");
     }
+
+    #[test]
+    fn a_partly_scrolled_box_keeps_its_visible_lines_in_place() {
+        // A five-line box scrolled until only its last two lines are on screen.
+        // Two bands against five wrapped lines, so the lines are spread evenly
+        // down the box and the three above the viewport are dropped.
+        let mut page = Page::new(10, 2);
+        page.line(PxRect::new(0.0, 0.0, 40.0, 16.0))
+            .line(PxRect::new(0.0, 16.0, 40.0, 32.0))
+            .text(
+                PxRect::new(0.0, -48.0, 80.0, 32.0),
+                1,
+                "one two three four five six seven eight",
+            );
+
+        let (buffer, _) = page.render(true);
+        assert_eq!(row(&buffer, 0), "seven     ");
+        assert_eq!(row(&buffer, 1), "eight     ");
+    }
 }
