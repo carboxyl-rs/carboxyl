@@ -31,7 +31,16 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Render with Servo
-        run: cargo run --release --locked --example render_smoke -- target/render-smoke
+        env:
+          FONTCONFIG_FILE: ${{ github.workspace }}/tests/fixtures/fonts/fonts.conf
+          XDG_CACHE_HOME: ${{ runner.temp }}/carboxyl-font-cache
+        run: |
+          sans_family="$(fc-match -f '%{family}' sans-serif)"
+          mono_family="$(fc-match -f '%{family}' monospace)"
+          printf 'Fixture fonts: %s / %s\n' "$sans_family" "$mono_family"
+          test "$sans_family" = 'Noto Sans'
+          test "$mono_family" = 'Noto Sans Mono'
+          cargo run --release --locked --example render_smoke -- target/render-smoke
 
       - name: Upload render snapshots
         if: always()

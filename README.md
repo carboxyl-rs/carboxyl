@@ -98,6 +98,8 @@ rendering over `tests/fixtures/rendering.html`, which is built to exercise those
 same cases, then scrolls, resizes and navigates away. It writes a text snapshot
 and the text box geometry of each screen to `target/render-smoke`. The fixture
 bundles its fonts so this check also works on hosts without system fonts.
+On Linux, use `FONTCONFIG_FILE="$PWD/tests/fixtures/fonts/fonts.conf"` when
+running `render_smoke` to register the fixture's font families, as CI does.
 
 ## Runtime Architecture
 
