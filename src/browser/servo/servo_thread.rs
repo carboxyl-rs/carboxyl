@@ -159,16 +159,17 @@ fn paint(
     ))?;
     context.present();
 
-    let text = a11y
+    let (text, images) = a11y
         .borrow_mut()
         .as_mut()
-        .map(Accessibility::boxes)
-        .unwrap_or_else(|| Vec::new().into());
+        .map(Accessibility::snapshot)
+        .unwrap_or_else(|| (Vec::new().into(), Vec::new().into()));
 
     Some(PageFrame {
         size: UVec2::new(image.width(), image.height()),
         pixels: image.into_raw(),
         text,
+        images,
     })
 }
 

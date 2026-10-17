@@ -114,6 +114,7 @@ mod tests {
             size,
             pixels: vec![pixel; (size.x * size.y * 4) as usize],
             text: Vec::new().into(),
+            images: Vec::new().into(),
         }
     }
 

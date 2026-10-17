@@ -22,8 +22,8 @@ pub struct Accessibility {
     /// Shared with every frame built since the last update, so a repaint of
     /// unchanged text copies nothing.
     boxes: Arc<[TextBox]>,
-    /// Set by every update; cleared once the boxes have been rebuilt, so a
-    /// repaint of unchanged content walks nothing.
+    images: Arc<[PxRect]>,
+    /// Rebuild text and image bounds only after a tree update.
     stale: bool,
 }
 
@@ -51,6 +51,7 @@ impl Accessibility {
         Self {
             tree: Tree::new(update, true),
             boxes: Vec::new().into(),
+            images: Vec::new().into(),
             stale: true,
         }
     }
@@ -60,22 +61,30 @@ impl Accessibility {
         self.stale = true;
     }
 
-    /// The page's text boxes, in document order.
-    pub fn boxes(&mut self) -> Arc<[TextBox]> {
+    /// The page's text boxes in document order, and its image regions.
+    pub fn snapshot(&mut self) -> (Arc<[TextBox]>, Arc<[PxRect]>) {
         if self.stale {
             let mut boxes = Vec::new();
-            collect(self.tree.state().root(), 0, None, &mut boxes);
+            let mut images = Vec::new();
+            collect(self.tree.state().root(), 0, None, &mut boxes, &mut images);
             boxes.retain(|text_box: &TextBox| !text_box.text.trim().is_empty());
             self.boxes = boxes.into();
+            self.images = images.into();
             self.stale = false;
         }
-        self.boxes.clone()
+        (self.boxes.clone(), self.images.clone())
     }
 }
 
 /// Walk the tree in document order, attaching each run of text to the nearest
 /// enclosing element that has geometry.
-fn collect(node: Node, depth: u16, anchor: Option<usize>, out: &mut Vec<TextBox>) {
+fn collect(
+    node: Node,
+    depth: u16,
+    anchor: Option<usize>,
+    out: &mut Vec<TextBox>,
+    images: &mut Vec<PxRect>,
+) {
     if node.is_hidden() {
         return;
     }
@@ -91,6 +100,17 @@ fn collect(node: Node, depth: u16, anchor: Option<usize>, out: &mut Vec<TextBox>
 
     let anchor = match node.bounding_box() {
         Some(rect) if rect.width() >= MIN_BOX_PIXELS && rect.height() >= MIN_BOX_PIXELS => {
+            if matches!(
+                node.role(),
+                Role::Image | Role::Canvas | Role::Video | Role::SvgRoot
+            ) {
+                images.push(PxRect::new(
+                    rect.x0 as f32,
+                    rect.y0 as f32,
+                    rect.x1 as f32,
+                    rect.y1 as f32,
+                ));
+            }
             out.push(TextBox {
                 rect: PxRect::new(
                     rect.x0 as f32,
@@ -109,7 +129,7 @@ fn collect(node: Node, depth: u16, anchor: Option<usize>, out: &mut Vec<TextBox>
     };
 
     for child in node.children() {
-        collect(child, depth.saturating_add(1), anchor, out);
+        collect(child, depth.saturating_add(1), anchor, out, images);
     }
 }
 

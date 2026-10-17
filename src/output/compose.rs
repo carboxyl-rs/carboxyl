@@ -539,6 +539,7 @@ mod tests {
         size: UVec2,
         pixels: Vec<u8>,
         boxes: Vec<TextBox>,
+        images: Vec<PxRect>,
     }
 
     impl Page {
@@ -548,6 +549,7 @@ mod tests {
                 size,
                 pixels: [PAPER.0, PAPER.1, PAPER.2, 255].repeat((size.x * size.y) as usize),
                 boxes: Vec::new(),
+                images: Vec::new(),
             }
         }
 
@@ -619,6 +621,7 @@ mod tests {
                 size: self.size,
                 pixels: self.pixels.clone(),
                 text: self.boxes.clone().into(),
+                images: self.images.clone().into(),
             };
             let mut canvas = Canvas::default();
             let tiles = canvas

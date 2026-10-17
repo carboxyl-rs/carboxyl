@@ -291,15 +291,17 @@ impl Page {
             .context("reading back the frame")?;
         self.context.present();
 
+        let (text, images) = self
+            .a11y
+            .borrow_mut()
+            .as_mut()
+            .map(Accessibility::snapshot)
+            .unwrap_or_else(|| (Vec::new().into(), Vec::new().into()));
         let frame = PageFrame {
             size: UVec2::new(image.width(), image.height()),
             pixels: image.into_raw(),
-            text: self
-                .a11y
-                .borrow_mut()
-                .as_mut()
-                .map(Accessibility::boxes)
-                .unwrap_or_else(|| Vec::new().into()),
+            text,
+            images,
         };
 
         let area = Rect::new(0, 0, self.cells.x as u16, self.cells.y as u16);

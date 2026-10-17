@@ -59,13 +59,16 @@ pub struct PageFrame {
     pub pixels: Vec<u8>,
     /// Text boxes in document order.
     pub text: Arc<[TextBox]>,
+    /// Image, canvas, video, and SVG bounds eligible for terminal graphics.
+    pub images: Arc<[PxRect]>,
 }
 
 impl PageFrame {
-    /// Whether pixels and text contents match `other`.
+    /// Whether pixels, text, and image regions match `other`.
     pub fn matches(&self, other: &Self) -> bool {
         self.size == other.size
             && same(&self.text, &other.text)
+            && same(&self.images, &other.images)
             && self.pixels == other.pixels
     }
 }
