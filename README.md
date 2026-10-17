@@ -109,11 +109,7 @@ of each screen to `target/render-smoke`.
 
 ## TODO
 
-* Text rendering using terminal native text (IN PROGRESS)
-
-  * Text rendering isn't quite clean for chunks of text
-  * Test for unrendered text
-  * Performance optimization (on native text)
+* Upstream text-run bounds ([servo#47164](https://github.com/servo/servo/issues/47164)) so line breaks can follow Servo's own instead of being re-derived
 
 * A fancy browser ui and more features (history, cookies*, tabs, etc)
 
