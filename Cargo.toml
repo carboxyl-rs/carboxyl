@@ -33,6 +33,7 @@ anyhow = "1"
 # Release optimizations.
 [profile.release]
 strip = true
-lto = true
+# Reduce link time while retaining cross-crate optimization.
+lto = "thin"
 codegen-units = 1
 panic = "abort"
