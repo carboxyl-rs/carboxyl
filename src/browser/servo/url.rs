@@ -26,3 +26,29 @@ pub fn normalize_url(raw: Option<String>) -> Result<Url> {
 
     Ok(Url::parse(&format!("https://{raw}"))?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relative_files_become_file_urls() {
+        let url = normalize_url(Some("Cargo.toml".into())).unwrap();
+        assert_eq!(url.scheme(), "file");
+        assert!(url.to_file_path().unwrap().is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_urls_preserve_the_base_for_relative_assets() {
+        let path = std::env::temp_dir().join(format!("carboxyl-url-{}.html", std::process::id()));
+        std::os::unix::fs::symlink(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+            &path,
+        )
+        .unwrap();
+        let result = normalize_url(Some(path.to_string_lossy().into_owned()));
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(result.unwrap().to_file_path().unwrap(), path);
+    }
+}
