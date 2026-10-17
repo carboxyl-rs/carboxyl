@@ -756,4 +756,25 @@ mod tests {
         assert_eq!(row(&buffer, 0), "seven     ");
         assert_eq!(row(&buffer, 1), "eight     ");
     }
+
+    #[test]
+    fn preformatted_text_keeps_its_lines_and_its_indentation() {
+        // Collapsed, this text wraps to two lines; as written it is three, and
+        // the page drew three. The indented lines start four cells in, which is
+        // where their ink starts - not where their box does.
+        let mut page = Page::new(20, 3);
+        page.line(PxRect::new(0.0, 0.0, 80.0, 16.0))
+            .line(PxRect::new(32.0, 16.0, 112.0, 32.0))
+            .line(PxRect::new(32.0, 32.0, 88.0, 48.0))
+            .text(
+                PxRect::new(0.0, 0.0, 160.0, 48.0),
+                1,
+                "let a = 1;\n    let b = 2;\n    done();",
+            );
+
+        let (buffer, _) = page.render(true);
+        assert_eq!(row(&buffer, 0).trim_end(), "let a = 1;");
+        assert_eq!(row(&buffer, 1).trim_end(), "    let b = 2;");
+        assert_eq!(row(&buffer, 2).trim_end(), "    done();");
+    }
 }
