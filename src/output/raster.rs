@@ -458,4 +458,16 @@ mod tests {
             vec![Band { row: 0, col: 0 }, Band { row: 1, col: 0 }]
         );
     }
+
+    #[test]
+    fn a_covered_box_reports_no_text_rows() {
+        let data = frame(8, 16, |_, _| (20, 33, 53));
+        let mut bands = Vec::new();
+        Pixels::new(&data, UVec2::new(8, 16)).unwrap().text_rows(
+            PxRect::new(0.0, 0.0, 8.0, 16.0),
+            UVec2::new(8, 16),
+            &mut bands,
+        );
+        assert!(bands.is_empty());
+    }
 }
