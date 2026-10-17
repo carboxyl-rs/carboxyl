@@ -23,7 +23,8 @@ transform to fixed elements in its accessibility tree. The compositor retains
 the previous raster to detect this: a moved text box keeps its previous position
 only when its entire old rectangle is visible and every pixel there is unchanged.
 Intersecting scrolled lines stay in the pixel layer, so they cannot overwrite
-the fixed text. Changed pixels, resizes and navigation discard that evidence.
+the fixed text. A pixel difference or a rectangle outside either viewport
+invalidates the comparison, including newly exposed regions after a resize.
 
 ## Where the text comes from
 

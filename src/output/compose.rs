@@ -41,6 +41,7 @@ pub struct Canvas {
     tiles: Vec<Rect>,
     boxes: Vec<TextBox>,
     previous: Option<PageFrame>,
+    previous_pinned: Vec<bool>,
 }
 
 /// The terminal grid one frame is composed onto.
@@ -127,23 +128,35 @@ impl Canvas {
             self.boxes.extend(frame.text.iter().cloned());
             self.text.pinned.clear();
             self.text.pinned.resize(self.boxes.len(), false);
-            if let Some(previous) = &self.previous
-                && previous.size == frame.size
-            {
-                for ((text, old), pinned) in self
+            if let Some(previous) = &self.previous {
+                for (index, ((text, old), pinned)) in self
                     .boxes
                     .iter_mut()
                     .zip(previous.text.iter())
                     .zip(&mut self.text.pinned)
+                    .enumerate()
                 {
+                    let was_pinned = self.previous_pinned.get(index).copied().unwrap_or(false);
+                    let candidate = if was_pinned {
+                        PxRect::new(
+                            old.rect.x0,
+                            old.rect.y0,
+                            old.rect.x0 + text.rect.width(),
+                            old.rect.y0 + text.rect.height(),
+                        )
+                    } else {
+                        old.rect
+                    };
                     if text.text == old.text
                         && text.depth == old.depth
-                        && text.rect != old.rect
-                        && text.rect.width() == old.rect.width()
-                        && text.rect.height() == old.rect.height()
-                        && unchanged_region(previous, frame, old.rect)
+                        && (text.rect != candidate || was_pinned)
+                        && (was_pinned
+                            || (previous.size == frame.size
+                                && text.rect.width() == old.rect.width()
+                                && text.rect.height() == old.rect.height()))
+                        && unchanged_region(previous, frame, candidate)
                     {
-                        text.rect = old.rect;
+                        text.rect = candidate;
                         *pinned = true;
                     }
                 }
@@ -212,8 +225,10 @@ impl Canvas {
             previous.size = frame.size;
             previous.pixels.clone_from(&frame.pixels);
             previous.text = self.boxes.clone().into();
+            self.previous_pinned.clone_from(&self.text.pinned);
         } else {
             self.previous = None;
+            self.previous_pinned.clear();
         }
         &self.tiles
     }
@@ -228,16 +243,21 @@ fn unchanged_region(previous: &PageFrame, current: &PageFrame, rect: PxRect) -> 
         || rect.y0 < 0.0
         || rect.x1 > current.size.x as f32
         || rect.y1 > current.size.y as f32
+        || rect.x1 > previous.size.x as f32
+        || rect.y1 > previous.size.y as f32
     {
         return false;
     }
     let x0 = rect.x0.floor() as usize;
     let x1 = rect.x1.ceil() as usize;
     let stride = current.size.x as usize * 4;
+    let old_stride = previous.size.x as usize * 4;
     (rect.y0.floor() as usize..rect.y1.ceil() as usize).all(|y| {
         let start = y * stride + x0 * 4;
         let end = y * stride + x1 * 4;
-        previous.pixels.get(start..end) == current.pixels.get(start..end)
+        let old_start = y * old_stride + x0 * 4;
+        let old_end = y * old_stride + x1 * 4;
+        previous.pixels.get(old_start..old_end) == current.pixels.get(start..end)
     })
 }
 
@@ -798,6 +818,12 @@ mod tests {
         let buffer = compose_frame(&mut canvas, &page.frame());
         assert_eq!(row(&buffer, 0).trim(), "HEADER");
         assert!(!row(&buffer, 0).contains("body"));
+
+        // A later relayout may repair the bounds; the unchanged header still
+        // covers the deeper body's box at that position.
+        page.boxes[0].rect = header;
+        let buffer = compose_frame(&mut canvas, &page.frame());
+        assert_eq!(row(&buffer, 0).trim(), "HEADER");
     }
 
     #[test]
@@ -815,6 +841,29 @@ mod tests {
         let buffer = compose_frame(&mut canvas, &page.frame());
         assert_eq!(row(&buffer, 0).trim(), "");
         assert_eq!(row(&buffer, 1).trim(), "moving");
+    }
+
+    #[test]
+    fn fixed_text_survives_a_narrower_viewport_when_its_pixels_still_match() {
+        let mut page = Page::new(12, 5);
+        page.line(PxRect::new(0.0, 0.0, 48.0, 16.0)).text(
+            PxRect::new(0.0, 0.0, 96.0, 16.0),
+            1,
+            "HEADER",
+        );
+        let mut canvas = Canvas::default();
+        compose_frame(&mut canvas, &page.frame());
+        page.boxes[0].rect = PxRect::new(0.0, -48.0, 96.0, -32.0);
+        compose_frame(&mut canvas, &page.frame());
+
+        let mut resized = Page::new(8, 5);
+        resized.line(PxRect::new(0.0, 0.0, 48.0, 16.0)).text(
+            PxRect::new(0.0, -48.0, 64.0, -32.0),
+            1,
+            "HEADER",
+        );
+        let buffer = compose_frame(&mut canvas, &resized.frame());
+        assert_eq!(row(&buffer, 0).trim(), "HEADER");
     }
 
     #[test]
