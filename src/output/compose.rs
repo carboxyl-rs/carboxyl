@@ -26,8 +26,8 @@ const MAX_TILES: usize = 64;
 /// `None` means the cell still belongs to the pixel layer.
 type Painted = Option<(Rgb, Rgb)>;
 
-/// Reusable scratch space for composing frames, so a steady-state repaint does
-/// not allocate.
+/// Reusable composition state, including the previous raster used to verify
+/// text that remains fixed while Servo's accessibility scroll transform moves.
 #[derive(Default)]
 pub struct Canvas {
     /// Per cell: the colors of the native glyph that owns it, if any.
@@ -39,6 +39,8 @@ pub struct Canvas {
     detailed: Vec<bool>,
     text: TextScratch,
     tiles: Vec<Rect>,
+    boxes: Vec<TextBox>,
+    previous: Option<PageFrame>,
 }
 
 /// The terminal grid one frame is composed onto.
@@ -72,6 +74,7 @@ struct Slot {
 
 #[derive(Default)]
 struct TextScratch {
+    pinned: Vec<bool>,
     order: Vec<u32>,
     bands: Vec<Band>,
     lines: Vec<String>,
@@ -120,8 +123,33 @@ impl Canvas {
         self.detailed.resize(cells, false);
 
         if options.native_text {
+            self.boxes.clear();
+            self.boxes.extend(frame.text.iter().cloned());
+            self.text.pinned.clear();
+            self.text.pinned.resize(self.boxes.len(), false);
+            if let Some(previous) = &self.previous
+                && previous.size == frame.size
+            {
+                for ((text, old), pinned) in self
+                    .boxes
+                    .iter_mut()
+                    .zip(previous.text.iter())
+                    .zip(&mut self.text.pinned)
+                {
+                    if text.text == old.text
+                        && text.depth == old.depth
+                        && text.rect != old.rect
+                        && text.rect.width() == old.rect.width()
+                        && text.rect.height() == old.rect.height()
+                        && unchanged_region(previous, frame, old.rect)
+                    {
+                        text.rect = old.rect;
+                        *pinned = true;
+                    }
+                }
+            }
             place_text(
-                &frame.text,
+                &self.boxes,
                 &pixels,
                 &grid,
                 buf,
@@ -179,8 +207,38 @@ impl Canvas {
         }
 
         merge_tiles(&grid, &self.detailed, &mut self.tiles);
+        if options.native_text {
+            let previous = self.previous.get_or_insert_with(|| frame.clone());
+            previous.size = frame.size;
+            previous.pixels.clone_from(&frame.pixels);
+            previous.text = self.boxes.clone().into();
+        } else {
+            self.previous = None;
+        }
         &self.tiles
     }
+}
+
+/// Only retain geometry when the entire old box is visible and every pixel
+/// still matches. Normal scrolling, navigation and changed overlays fail this
+/// check, so they cannot resurrect text from an earlier frame.
+fn unchanged_region(previous: &PageFrame, current: &PageFrame, rect: PxRect) -> bool {
+    if !rect.is_visible_in(current.size)
+        || rect.x0 < 0.0
+        || rect.y0 < 0.0
+        || rect.x1 > current.size.x as f32
+        || rect.y1 > current.size.y as f32
+    {
+        return false;
+    }
+    let x0 = rect.x0.floor() as usize;
+    let x1 = rect.x1.ceil() as usize;
+    let stride = current.size.x as usize * 4;
+    (rect.y0.floor() as usize..rect.y1.ceil() as usize).all(|y| {
+        let start = y * stride + x0 * 4;
+        let end = y * stride + x1 * 4;
+        previous.pixels.get(start..end) == current.pixels.get(start..end)
+    })
 }
 
 /// Whether a cell centre lies inside an image region eligible for upload.
@@ -222,7 +280,10 @@ fn place_text(
     let mut order = std::mem::take(&mut scratch.order);
     order.clear();
     order.extend(0..boxes.len() as u32);
-    order.sort_by_key(|index| Reverse(boxes[*index as usize].depth));
+    order.sort_by_key(|index| {
+        let index = *index as usize;
+        (Reverse(scratch.pinned[index]), Reverse(boxes[index].depth))
+    });
 
     for &index in &order {
         let text_box = &boxes[index as usize];
@@ -289,6 +350,20 @@ fn place_text(
                 continue;
             }
             previous = Some(row);
+            // An unchanged fixed region owns its screen position even when a
+            // scrolled accessibility box incorrectly lands on the same pixels.
+            // Leave intersecting lines to the raster rather than overwrite it.
+            if !scratch.pinned[index as usize]
+                && boxes.iter().enumerate().any(|(other, text)| {
+                    scratch.pinned[other]
+                        && (f32::from(row) * grid.cell.y as f32) < text.rect.y1
+                        && (f32::from(row + 1) * grid.cell.y as f32) > text.rect.y0
+                        && (f32::from(start) * grid.cell.x as f32) < text.rect.x1
+                        && (f32::from(col1) * grid.cell.x as f32) > text.rect.x0
+                })
+            {
+                continue;
+            }
             draw_line(
                 line,
                 Slot {
@@ -649,12 +724,7 @@ mod tests {
 
         fn render_into(&self, area: Rect, native_text: bool) -> (Buffer, Vec<Rect>) {
             let mut buffer = Buffer::empty(area);
-            let frame = PageFrame {
-                size: self.size,
-                pixels: self.pixels.clone(),
-                text: self.boxes.clone().into(),
-                images: self.images.clone().into(),
-            };
+            let frame = self.frame();
             let mut canvas = Canvas::default();
             let tiles = canvas
                 .compose(
@@ -670,12 +740,94 @@ mod tests {
                 .to_vec();
             (buffer, tiles)
         }
+
+        fn frame(&self) -> PageFrame {
+            PageFrame {
+                size: self.size,
+                pixels: self.pixels.clone(),
+                text: self.boxes.clone().into(),
+                images: self.images.clone().into(),
+            }
+        }
+    }
+
+    fn compose_frame(canvas: &mut Canvas, frame: &PageFrame) -> Buffer {
+        let area = Rect::new(
+            0,
+            0,
+            (frame.size.x / CELL.x) as u16,
+            (frame.size.y / CELL.y) as u16,
+        );
+        let mut buffer = Buffer::empty(area);
+        canvas.compose(
+            area,
+            &mut buffer,
+            frame,
+            CELL,
+            Options {
+                true_color: true,
+                native_text: true,
+            },
+        );
+        buffer
     }
 
     fn row(buffer: &Buffer, row: u16) -> String {
         (0..buffer.area.width)
             .map(|col| buffer[(buffer.area.x + col, buffer.area.y + row)].symbol())
             .collect()
+    }
+
+    #[test]
+    fn unchanged_fixed_text_keeps_its_position_and_blocks_scrolled_text() {
+        let mut page = Page::new(12, 5);
+        let header = PxRect::new(0.0, 0.0, 96.0, 16.0);
+        let body = PxRect::new(0.0, 48.0, 96.0, 64.0);
+        page.line(PxRect::new(0.0, 0.0, 48.0, 16.0))
+            .text(header, 1, "HEADER");
+        page.line(PxRect::new(0.0, 48.0, 32.0, 64.0))
+            .text(body, 2, "body");
+        let mut canvas = Canvas::default();
+        compose_frame(&mut canvas, &page.frame());
+
+        // Servo translates both accessibility boxes, but the fixed header's
+        // pixels stay at the top and cover the scrolled body.
+        page.fill(body, PAPER);
+        page.boxes[0].rect = PxRect::new(0.0, -48.0, 96.0, -32.0);
+        page.boxes[1].rect = header;
+        let buffer = compose_frame(&mut canvas, &page.frame());
+        assert_eq!(row(&buffer, 0).trim(), "HEADER");
+        assert!(!row(&buffer, 0).contains("body"));
+    }
+
+    #[test]
+    fn scrolling_text_follows_its_changed_pixels() {
+        let mut page = Page::new(12, 5);
+        let old = PxRect::new(0.0, 0.0, 96.0, 16.0);
+        let new = PxRect::new(0.0, 16.0, 96.0, 32.0);
+        page.line(PxRect::new(0.0, 0.0, 48.0, 16.0))
+            .text(old, 1, "moving");
+        let mut canvas = Canvas::default();
+        compose_frame(&mut canvas, &page.frame());
+        page.fill(old, PAPER)
+            .line(PxRect::new(0.0, 16.0, 48.0, 32.0));
+        page.boxes[0].rect = new;
+        let buffer = compose_frame(&mut canvas, &page.frame());
+        assert_eq!(row(&buffer, 0).trim(), "");
+        assert_eq!(row(&buffer, 1).trim(), "moving");
+    }
+
+    #[test]
+    fn changed_pixels_do_not_restore_offscreen_text() {
+        let mut page = Page::new(12, 5);
+        let header = PxRect::new(0.0, 0.0, 96.0, 16.0);
+        page.line(header).text(header, 1, "HEADER");
+        let mut canvas = Canvas::default();
+        compose_frame(&mut canvas, &page.frame());
+        page.fill(header, (80, 80, 80));
+        page.boxes[0].rect = PxRect::new(0.0, -48.0, 96.0, -32.0);
+        let buffer = compose_frame(&mut canvas, &page.frame());
+        assert!(!row(&buffer, 0).contains("HEADER"));
     }
 
     #[test]

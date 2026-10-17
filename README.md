@@ -88,7 +88,7 @@ $ cargo clippy --locked --workspace --all-targets -- -D warnings
 $ cargo run --release --locked --example render_smoke -- target/render-smoke
 ```
 
-Composition is a pure function of a page frame, so the cases that are easy to get
+Composition works directly with page frames, so the cases that are easy to get
 wrong - occlusion, fixed headers, scrolled boxes, wrapping, wide graphemes,
 inline layout, graphics tiling - are covered by ordinary unit tests in
 `cargo test`, with no Servo, no network and no window server.

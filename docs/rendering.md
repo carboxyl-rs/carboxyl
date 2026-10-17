@@ -17,9 +17,13 @@ pub struct PageFrame {
 
 Both halves are produced in the same Servo turn, by `servo_thread::paint`. That
 is the property the rest of the design rests on: the glyph layer and the pixel
-layer cannot describe different scroll positions, because there is no second
-clock for them to drift against. Scrolling, resizing and navigating are all just
-new frames.
+layer use the same frame, with no second clock to drift against. Scrolling,
+resizing and navigating are all new frames. Servo can still apply a root scroll
+transform to fixed elements in its accessibility tree. The compositor retains
+the previous raster to detect this: a moved text box keeps its previous position
+only when its entire old rectangle is visible and every pixel there is unchanged.
+Intersecting scrolled lines stay in the pixel layer, so they cannot overwrite
+the fixed text. Changed pixels, resizes and navigation discard that evidence.
 
 ## Where the text comes from
 
@@ -39,11 +43,10 @@ against the terminal grid.
 
 Two things make that behave:
 
-- **Tree depth decides order.** Deeper boxes are placed first, so a link inside
-  a paragraph takes its own columns before the paragraph's text is laid out, and
-  the paragraph then flows around it. That reproduces inline layout without
-  per-line geometry, and leaves a blank column where the whitespace either side
-  of the nested box collapsed.
+- **Inline runs stay together.** Links, emphasis and other phrasing content join
+  their enclosing box in document order. This avoids splitting proportional
+  inline geometry into incompatible terminal columns. Nested block boxes still
+  reserve their cells before their ancestors, ordered by tree depth.
 - **The pixels decide where the lines are.** `Pixels::text_rows` finds the bands
   of ink inside a box: one per line, with the cell its leftmost ink falls in.
   When there are as many bands as wrapped lines, each line goes on its own band,
