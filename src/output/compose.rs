@@ -777,4 +777,26 @@ mod tests {
         assert_eq!(row(&buffer, 1).trim_end(), "    let b = 2;");
         assert_eq!(row(&buffer, 2).trim_end(), "    done();");
     }
+
+    #[test]
+    fn graphics_tiles_cover_the_detailed_cells_and_never_a_glyph() {
+        let mut page = Page::new(8, 2);
+        page.detail(PxRect::new(16.0, 16.0, 48.0, 32.0))
+            .line(PxRect::new(0.0, 0.0, 24.0, 16.0))
+            .text(PxRect::new(0.0, 0.0, 24.0, 16.0), 1, "hi");
+
+        let (buffer, tiles) = page.render(true);
+        assert_eq!(tiles, vec![Rect::new(2, 1, 4, 1)]);
+        assert_eq!(&row(&buffer, 0)[..2], "hi");
+
+        // No tile may sit on a cell a glyph owns, or the image would cover it.
+        for tile in &tiles {
+            for col in tile.x..tile.right() {
+                for tile_row in tile.y..tile.bottom() {
+                    assert_eq!(buffer[(col, tile_row)].symbol().chars().count(), 1);
+                    assert!(!"hi".contains(buffer[(col, tile_row)].symbol()));
+                }
+            }
+        }
+    }
 }
