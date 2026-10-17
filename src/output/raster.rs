@@ -470,4 +470,22 @@ mod tests {
         );
         assert!(bands.is_empty());
     }
+
+    #[test]
+    fn a_left_border_does_not_mark_every_row_as_inked() {
+        let data = frame(
+            32,
+            16,
+            |x, _| {
+                if x < 4 { (0, 0, 0) } else { (255, 255, 255) }
+            },
+        );
+        let mut bands = Vec::new();
+        Pixels::new(&data, UVec2::new(32, 16)).unwrap().text_rows(
+            PxRect::new(0.0, 0.0, 32.0, 16.0),
+            UVec2::new(8, 16),
+            &mut bands,
+        );
+        assert!(bands.is_empty());
+    }
 }
