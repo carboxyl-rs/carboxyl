@@ -32,7 +32,9 @@ It does not require a window server (i.e. works in a safe-mode console), and eve
 
 - The active runtime path is Servo-based.
 - Chromium-specific build glue and launch scripts are removed from the supported workflow.
-- Rendering currently goes through Servo's software rendering context so it can stay terminal-first and window-server-free.
+- Rendering goes through Servo's software rendering context so it can stay terminal-first and window-server-free.
+- Servo 0.7 is resolved entirely from crates.io, including its component crates.
+- Native terminal text comes from Servo's accessibility tree, which Servo pushes on every load, relayout and scroll. Text and pixels are produced in the same Servo turn, so they cannot disagree about where the page is. See [how rendering works](docs/rendering.md).
 
 ## Usage
 
