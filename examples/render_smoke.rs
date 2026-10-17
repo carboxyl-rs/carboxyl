@@ -221,7 +221,12 @@ impl Page {
         // Ignore a late load completion from the previous about:blank page.
         while !(self.progress.loaded.get() && self.webview.url().as_ref() == Some(&url)) {
             if Instant::now() > deadline {
-                bail!("timed out loading {url}");
+                bail!(
+                    "timed out loading {url} (at {:?}, {:?}, loaded flag {})",
+                    self.webview.url(),
+                    self.webview.load_status(),
+                    self.progress.loaded.get()
+                );
             }
             self.servo.spin_event_loop();
             thread::park_timeout(Duration::from_millis(2));
