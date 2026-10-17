@@ -75,7 +75,7 @@ WebXR, and GStreamer media are not enabled in the default terminal build.
 ## Build
 
 ```console
-$ cargo build --release
+$ cargo build --release --locked
 ```
 
 The build is now a normal Cargo build for the `carboxyl` binary. The first build will download the published `servo` crate and its dependencies through Cargo.
