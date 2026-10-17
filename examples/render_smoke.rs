@@ -218,7 +218,8 @@ impl Page {
         self.progress.loaded.set(false);
         self.webview.load(url.clone());
         let deadline = Instant::now() + DEADLINE;
-        while !self.progress.loaded.get() {
+        // Ignore a late load completion from the previous about:blank page.
+        while !(self.progress.loaded.get() && self.webview.url().as_ref() == Some(&url)) {
             if Instant::now() > deadline {
                 bail!("timed out loading {url}");
             }
