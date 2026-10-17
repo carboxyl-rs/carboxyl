@@ -113,9 +113,7 @@ of each screen to `target/render-smoke`.
 
 * A fancy browser ui and more features (history, cookies*, tabs, etc)
 
-* Optional hi-res terminal graphics (Sixel / Kitty)
-
-  * Feature detection + ANSI fallback
+* Text selection and copy, now that the text is real glyphs
 
 ## Notes
 
