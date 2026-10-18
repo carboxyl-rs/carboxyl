@@ -2,15 +2,18 @@ name: CI
 
 on:
   push:
-    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
+  workflow_dispatch:
+  schedule:
+    # Monthly.
+    - cron: "0 0 1 * *"
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
+    name: Test, Fmt, Clippy, Render
     runs-on: self-hosted # Lysator giant-rat (Arch Linux).
 
     steps:
@@ -20,6 +23,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Test
         run: cargo test --locked --verbose
@@ -44,8 +50,25 @@ jobs:
 
       - name: Upload render snapshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: render-smoke
           path: target/render-smoke
           if-no-files-found: ignore
+
+  deps:
+    name: Unused dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-shear
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-shear
+
+      - name: Unused dependencies
+        run: cargo shear

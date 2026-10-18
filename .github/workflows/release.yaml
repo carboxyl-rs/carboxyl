@@ -13,21 +13,60 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
-    name: Build and Release
-    runs-on: self-hosted # giant-rat (runs arch linux), provided by lysator
+  build:
+    runs-on: self-hosted # Lysator giant-rat (Arch Linux).
+
+    env:
+      target: x86_64-unknown-linux-gnu
+      artifact_name: carboxyl-x86_64-unknown-linux-gnu
+      archive_name: carboxyl-${{ github.ref_name }}-x86_64-linux.tar.gz
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout code
+        uses: actions/checkout@v7
 
-      - name: Install Rust
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.target }}
 
-      - name: Build
-        run: cargo build --release --locked
+      - name: Build release binary
+        run: cargo build --release --locked --target ${{ env.target }}
 
-      - name: Release
+      - name: Prepare and compress binary
+        run: |
+          mkdir -p artifacts
+          cp target/${{ env.target }}/release/carboxyl artifacts/${{ env.artifact_name }}
+          chmod +x artifacts/${{ env.artifact_name }}
+
+          # Create compressed archive with clean name
+          cd artifacts
+          tar -czf ${{ env.archive_name }} ${{ env.artifact_name }}
+          ls -lh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.artifact_name }}
+          path: artifacts/${{ env.archive_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download built archive
+        uses: actions/download-artifact@v8
+        with:
+          name: carboxyl-x86_64-unknown-linux-gnu
+          path: artifacts
+
+      - name: Create draft GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: target/release/carboxyl
+          tag_name: ${{ github.ref_name }}
+          name: carboxyl ${{ github.ref_name }}
+          draft: true
           generate_release_notes: true
+          files: |
+            artifacts/carboxyl-${{ github.ref_name }}-x86_64-linux.tar.gz

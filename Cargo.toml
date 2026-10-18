@@ -26,8 +26,9 @@ servo = { version = "0.7", default-features = false, features = [
   "webgl",
   "brotli-compression-stream",
 ] }
-# Match Servo's AccessKit version so tree updates share the same types.
-accesskit_consumer = "0.35"
+# Must sit on the same `accesskit` as Servo so tree
+# updates share the same types. So bump this only alongside Servo.
+accesskit_consumer = "0.38"
 url = "2.5"
 clap = { version = "4", features = ["derive"] }
 ratatui = { version = "0.30", default-features = false, features = [
@@ -44,7 +45,7 @@ unicode-width = "0.2"
 unicode-segmentation = "1.13"
 log = "0.4"
 simplelog = "0.12"
-glam = "0.33"
+glam = "0.34"
 signal-hook = "0.4"
 anyhow = "1"
 
